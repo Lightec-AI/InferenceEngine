@@ -1,0 +1,135 @@
+/**
+ * Shared OPE inference protocol types (gateway ↔ engine contract).
+ * OPE crypto: `vendor/ope` in TeeChat. Gateway registry: TeeChat `server/confidential-ai/`.
+ */
+
+export interface EngineStartupIdentity {
+  engine_id: string;
+  kex: string;
+  ed25519_public: string;
+}
+
+/** @deprecated Startup identity + ephemeral hybrid; not a single static ML-KEM key. */
+export interface EngineIdentity extends EngineStartupIdentity {
+  mlkem_encapsulation_key: string;
+  x25519_public: string;
+}
+
+export interface EngineHybridPublic {
+  kex: string;
+  mlkem_encapsulation_key: string;
+  x25519_public: string;
+}
+
+export interface WorkloadMeasurements {
+  version: string;
+  binary_sha256: string;
+}
+
+export interface CpuTeeAttestation {
+  kind: "tdx" | "sev-snp";
+  quote: string;
+  verdict: "pass" | "fail";
+  policy_id: string;
+}
+
+export interface GpuTeeAttestation {
+  kind: "nv-cc" | "amd-gpu-tee";
+  evidence: string;
+  verdict: "pass" | "fail";
+}
+
+export interface AttestationBundle {
+  cpu_tee: CpuTeeAttestation;
+  gpu_tee: GpuTeeAttestation;
+  vllm: WorkloadMeasurements;
+  engine: WorkloadMeasurements;
+}
+
+export interface EngineRegisterRequest {
+  engine_id: string;
+  models: string[];
+  identity: EngineStartupIdentity;
+  attestation: AttestationBundle;
+  inference_base_url: string;
+  tls_client_cert_sha256?: string;
+}
+
+export interface EngineEphemeralRegisterRequest {
+  engine_id: string;
+  epoch_id: string;
+  not_before: string;
+  not_after: string;
+  hybrid: EngineHybridPublic;
+  identity_signature: string;
+  attestation?: AttestationBundle;
+}
+
+export interface EngineTrustBundle {
+  engine_id: string;
+  epoch_id: string;
+  not_before: string;
+  not_after: string;
+  hybrid: EngineHybridPublic;
+  identity: {
+    ed25519_public: string;
+    identity_signature: string;
+  };
+  attestation: AttestationBundle;
+  gateway_cached_at: string;
+}
+
+export interface OpeE2eDescriptor {
+  kex: string;
+  client_share?: string;
+  engine_mlkem_encap: string;
+  engine_x25519: string;
+  ephemeral_epoch: string;
+  content_alg?: string;
+}
+
+export interface UsageReport {
+  request_id: string;
+  conversation_id: string;
+  engine_id: string;
+  prompt_tokens: number;
+  completion_tokens: number;
+  ts: string;
+}
+
+export interface SignedUsageReport {
+  report: UsageReport;
+  sig: string;
+}
+
+export interface OpeEnvelopeMeta {
+  conversation_id?: string;
+  model?: string;
+  tenant?: string;
+  metering?: { units?: number };
+  route?: { engine_id?: string };
+}
+
+export interface OpeEnvelope {
+  ope_version: string;
+  alg: string;
+  enc: string;
+  kid: string;
+  recipient: string;
+  ts: string;
+  nonce: string;
+  payload_hash: string;
+  engine_id?: string;
+  meta?: OpeEnvelopeMeta;
+  sig?: string;
+  ciphertext?: string;
+  iv?: string;
+  e2e?: OpeE2eDescriptor | unknown;
+}
+
+export const HEADER_ENGINE_CLIENT_CERT = "x-ope-engine-client-cert-sha256";
+export const HEADER_USAGE_REPORT = "x-ope-usage-report";
+export const CONTENT_TYPE_OPE_JSON = "application/ope+json";
+export const INFERENCE_PATH = "/v1/ope/inference";
+
+export const MOCK_MLKEM_ENCAP_B64URL_LEN = 1184;
