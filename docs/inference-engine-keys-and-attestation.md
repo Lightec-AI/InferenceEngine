@@ -20,8 +20,8 @@ Detailed design for **requirement.txt §38–53**: how inference engines obtain 
 
 | Concern | OPE library (`vendor/ope`) | TeeChat gateway | Inference engine deploy |
 |---------|---------------------------|-----------------|-------------------------|
-| Hybrid E2E math, envelope | `ope-e2e`, `ope-envelope` | Forward opaque | Decrypt / encrypt |
-| Quote parse/verify (TDX/SEV/GPU) | **`ope-attest`** (to implement) | Policy + cache verdicts | Produce quotes at startup/register |
+| Hybrid E2E math, envelope | `ope-e2e`, `ope-envelope`, `ope-ffi` (C ABI) | Forward opaque | Decrypt / encrypt (via `ope-ffi`/koffi) |
+| Quote parse/verify (TDX/SEV/GPU) | **`ope-attest`** (real backend to implement) | Policy + cache verdicts; pluggable verifier seam | Produce quotes at startup/register |
 | mTLS credential binding | Attestation extensions + verify APIs | Registry + AWF thumbprint | Generate TLS client key in TEE |
 | HTTP registry, affinity, billing | — | TeeChat `server/confidential-ai/` | This package (`src/`) |
 
@@ -74,7 +74,9 @@ Detailed design for **requirement.txt §38–53**: how inference engines obtain 
 4. **Sign** canonical bytes with `ed25519_identity_sk`.
 5. `POST` registration to gateway (§5) over existing mTLS connection.
 
-**Client encryption target:** `enc=e2e-hybrid-pq` uses **`engine_mlkem_encap` / `engine_x25519` from the active ephemeral record**, not a multi-month static key. OPE spec §3 “long-lived” is interpreted in TeeChat as **identity binding** (Ed25519 + attestation), not immutability of ML-KEM encap key. OPE library should add a **`ephemeral_epoch`** field to `e2e` in a TeeChat profile addendum.
+**Client encryption target:** `enc=e2e-hybrid-pq` uses **`engine_mlkem_encap` / `engine_x25519` from the active ephemeral record**, not a multi-month static key. OPE spec §3 “long-lived” is interpreted in TeeChat as **identity binding** (Ed25519 + attestation), not immutability of ML-KEM encap key.
+
+The OPE `e2e` object does not itself carry the epoch id; the client (`OpeClient.encryptRequest`) adds **`ephemeral_epoch`** to the `e2e` object after encryption, taken from the verified trust bundle, so the gateway can validate and route by epoch (`server/confidential-ai/handlers.ts` `parseE2e`).
 
 ---
 
@@ -327,15 +329,24 @@ sequenceDiagram
 
 | Requirement area | Status | Code |
 |------------------|--------|------|
-| Attestation verify (mock) | **Implemented** | `src/attestation.ts` |
+| Real hybrid E2E crypto (X25519MLKEM768 + ChaCha20-Poly1305) | **Implemented** | OPE `ope-e2e`/`ope-ffi` via `src/native/ope-ffi.ts` |
+| Build-mode gate (dev mocks; prod fail-closed) | **Implemented** | `src/build-mode.ts`, `src/crypto/provider.ts` |
+| Engine real epoch keygen + request decrypt | **Implemented** | `src/engine/epoch.ts`, `ope_e2e_engine_*` |
+| Client encrypt + response-stream decrypt | **Implemented** | `src/client/ope-client.ts` |
+| Attestation verify — dev HMAC mock | **Implemented** | `src/attestation.ts` (`MockCpuQuoteVerifier`) |
+| Attestation verify — production seam | **Implemented (seam)** | `ProductionCpuQuoteVerifier` + `registerProductionQuoteBackend` |
 | Ephemeral signing verify | **Implemented** | `src/ephemeral.ts` |
 | Client trust bundle | **Implemented** | `src/client-trust.ts` |
-| Mock engine keys | **Implemented** | `src/testing/mock-keys.ts` |
+| Mock engine keys (dev/tests) | **Implemented** | `src/testing/mock-keys.ts` |
 | Gateway register / trust / chat | **Implemented** | TeeChat `server/confidential-ai/` |
-| Production TDX/SEV/GPU quotes | **Planned** | OPE `ope-attest` in consuming repo |
+| Production TDX/SEV/GPU quote **backend** | **Planned** | wire `ope-attest` via `registerProductionQuoteBackend` |
+| Browser/mobile WASM crypto binding | **Planned** | `ope-ffi` WASM build |
+
+The native library is built with `pnpm build:ffi` (cargo `ope-ffi`) and loaded via `koffi`.
 
 ```bash
-pnpm test          # this package
+pnpm build:ffi     # build the ope-ffi cdylib
+pnpm test          # this package (global setup builds the cdylib)
 # TeeChat: pnpm exec vitest run server/confidential-ai
 ```
 
