@@ -10,10 +10,13 @@
  * a `null` result as fatal (see `build-mode.ts`).
  */
 
-import { existsSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { existsSync, readFileSync } from "node:fs";
 import { createRequire } from "node:module";
-import { dirname, resolve } from "node:path";
+import { dirname, isAbsolute, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+
+import { isProduction } from "../build-mode.js";
 
 const require = createRequire(import.meta.url);
 const here = dirname(fileURLToPath(import.meta.url));
@@ -100,7 +103,59 @@ export function candidateLibraryPaths(env: NodeJS.ProcessEnv = process.env): str
   return candidates;
 }
 
+/**
+ * SEC-026: in production, the native library must be loaded from an explicit, absolute,
+ * operator-controlled path — never a cwd-relative or `target/debug` build artifact that a
+ * lower-privileged process could plant. Dev/test keeps the convenient search path.
+ */
+function productionLibraryPath(env: NodeJS.ProcessEnv): string {
+  const configured = env.TEECHAT_OPE_FFI_LIB?.trim();
+  if (!configured) {
+    throw new OpeFfiError(
+      "production builds require TEECHAT_OPE_FFI_LIB to point at an absolute, vetted libope_ffi path",
+    );
+  }
+  if (!isAbsolute(configured)) {
+    throw new OpeFfiError(
+      `TEECHAT_OPE_FFI_LIB must be an absolute path in production (got: ${configured})`,
+    );
+  }
+  if (!existsSync(configured)) {
+    throw new OpeFfiError(`TEECHAT_OPE_FFI_LIB does not exist: ${configured}`);
+  }
+  return configured;
+}
+
+/**
+ * SEC-026: if `TEECHAT_OPE_FFI_SHA256` is set, verify the on-disk library hash before loading
+ * it. Production requires the pin; dev enforces it only when provided.
+ */
+function verifyLibraryIntegrity(libPath: string, env: NodeJS.ProcessEnv): void {
+  const expected = env.TEECHAT_OPE_FFI_SHA256?.trim().toLowerCase();
+  if (!expected) {
+    if (isProduction(env)) {
+      throw new OpeFfiError(
+        "production builds require TEECHAT_OPE_FFI_SHA256 to pin the native library hash",
+      );
+    }
+    return;
+  }
+  if (!/^[0-9a-f]{64}$/.test(expected)) {
+    throw new OpeFfiError("TEECHAT_OPE_FFI_SHA256 must be a 64-char hex sha-256 digest");
+  }
+  const actual = createHash("sha256").update(readFileSync(libPath)).digest("hex");
+  if (actual !== expected) {
+    throw new OpeFfiError(
+      `ope-ffi library hash mismatch (possible tampering): expected ${expected}, got ${actual}`,
+    );
+  }
+}
+
 function resolveLibraryPath(env: NodeJS.ProcessEnv): string | null {
+  if (isProduction(env)) {
+    // Throws (fail closed) rather than silently falling back to an untrusted artifact.
+    return productionLibraryPath(env);
+  }
   for (const p of candidateLibraryPaths(env)) {
     if (existsSync(p)) return p;
   }
@@ -149,6 +204,8 @@ export function loadOpeFfi(env: NodeJS.ProcessEnv = process.env): OpeFfi | null 
     cached = null;
     return null;
   }
+
+  verifyLibraryIntegrity(libPath, env);
 
   let koffi: typeof import("koffi");
   try {

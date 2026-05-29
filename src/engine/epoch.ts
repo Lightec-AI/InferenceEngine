@@ -46,23 +46,35 @@ export function createEngineEpoch(args: {
 
   const { hybrid, handle } = provider.generateEngineHybrid(args.engineId, args.ed25519PublicB64);
 
-  const identity_signature = sign(
-    null,
-    ephemeralSigningBytes({ engineId: args.engineId, epochId, notAfter, hybrid }),
-    args.ed25519PrivateKey,
-  ).toString("base64url");
+  try {
+    const identity_signature = sign(
+      null,
+      ephemeralSigningBytes({ engineId: args.engineId, epochId, notAfter, hybrid }),
+      args.ed25519PrivateKey,
+    ).toString("base64url");
 
-  const ephemeralRequest: EngineEphemeralRegisterRequest = {
-    engine_id: args.engineId,
-    epoch_id: epochId,
-    not_before: notBefore,
-    not_after: notAfter,
-    hybrid,
-    identity_signature,
-    ...(args.attestation ? { attestation: args.attestation } : {}),
-  };
+    const ephemeralRequest: EngineEphemeralRegisterRequest = {
+      engine_id: args.engineId,
+      epoch_id: epochId,
+      not_before: notBefore,
+      not_after: notAfter,
+      hybrid,
+      identity_signature,
+      ...(args.attestation ? { attestation: args.attestation } : {}),
+    };
 
-  return { epochId, hybrid, ephemeralRequest, notBefore, notAfter, handle, provider };
+    return { epochId, hybrid, ephemeralRequest, notBefore, notAfter, handle, provider };
+  } catch (e) {
+    // SEC-028: don't leak the native epoch handle if signing/assembly fails.
+    if (handle != null) {
+      try {
+        provider.freeEngine(handle);
+      } catch {
+        /* best-effort cleanup */
+      }
+    }
+    throw e;
+  }
 }
 
 /** Release the native epoch handle (call on rotation/shutdown). */
