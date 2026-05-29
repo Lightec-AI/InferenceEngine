@@ -8,6 +8,7 @@ export * from "./build-mode.js";
 export * from "./crypto/provider.js";
 export * from "./engine/epoch.js";
 export * from "./client/ope-client.js";
+export * from "./client/gateway-mtls.js";
 export {
   loadOpeFfi,
   requireOpeFfi,
