@@ -4,4 +4,18 @@ export * from "./attestation.js";
 export * from "./ephemeral.js";
 export * from "./metering.js";
 export * from "./client-trust.js";
-export { createMockInferenceServer } from "./server/mock-inference.js";
+export * from "./build-mode.js";
+export * from "./crypto/provider.js";
+export * from "./engine/epoch.js";
+export {
+  loadOpeFfi,
+  requireOpeFfi,
+  candidateLibraryPaths,
+  OpeFfiError,
+  type OpeFfi,
+  type EngineIdentityFull,
+} from "./native/ope-ffi.js";
+export {
+  createMockInferenceServer,
+  type MockInferenceDecryptor,
+} from "./server/mock-inference.js";

@@ -1,13 +1,36 @@
 import http from "node:http";
 import { createHash } from "node:crypto";
 
+import type { CryptoProvider } from "../crypto/provider.js";
 import { conversationKvKey, planVllmPrefill } from "../prefill.js";
 import type { OpeEnvelope, SignedUsageReport } from "../protocol/types.js";
 import { HEADER_USAGE_REPORT, INFERENCE_PATH } from "../protocol/types.js";
 
+/** Real-decryption hook: the engine's live epoch handle + crypto provider. */
+export interface MockInferenceDecryptor {
+  handle: number;
+  provider: CryptoProvider;
+}
+
+interface DecryptedChatPayload {
+  messages?: Array<{ role?: string; content?: unknown }>;
+}
+
+function tokensFromText(text: string): number {
+  return Math.max(1, Math.ceil(text.length / 4));
+}
+
 function estimatePromptTokens(envelope: OpeEnvelope): number {
   const raw = envelope.ciphertext ?? "";
   return Math.max(1, Math.ceil(raw.length / 4));
+}
+
+/** Prompt tokens from the *decrypted* payload (real engine path). */
+function promptTokensFromPayload(payload: DecryptedChatPayload): number {
+  const text = (payload.messages ?? [])
+    .map((m) => (typeof m.content === "string" ? m.content : JSON.stringify(m.content ?? "")))
+    .join(" ");
+  return tokensFromText(text);
 }
 
 function prefixHash(envelope: OpeEnvelope): string {
@@ -19,8 +42,10 @@ function prefixHash(envelope: OpeEnvelope): string {
 /** Dev/test HTTP server implementing POST /v1/ope/inference. */
 export function createMockInferenceServer(
   onInference?: (envelope: OpeEnvelope, prefillTokens: number) => SignedUsageReport,
+  options: { decryptor?: MockInferenceDecryptor } = {},
 ): Promise<{ server: http.Server; baseUrl: string }> {
   const kvByConversation = new Map<string, { prefixHash: string; prefilledTokens: number }>();
+  const decryptor = options.decryptor;
 
   return new Promise((resolve, reject) => {
     const server = http.createServer((req, res) => {
@@ -44,7 +69,26 @@ export function createMockInferenceServer(
         const convId = envelope.meta?.conversation_id ?? "conv-test";
         const model = envelope.meta?.model ?? "unknown";
         const kvKey = conversationKvKey(convId, model);
-        const promptTokens = estimatePromptTokens(envelope);
+
+        // Real engine path: decrypt the request to measure the actual prompt. The
+        // mock token-length estimate is only used when no decryptor is configured.
+        let promptTokens: number;
+        if (decryptor && envelope.enc === "e2e-hybrid-pq") {
+          try {
+            const payload = decryptor.provider.decryptRequest(
+              decryptor.handle,
+              envelope,
+            ) as DecryptedChatPayload;
+            promptTokens = promptTokensFromPayload(payload);
+          } catch (e) {
+            res.statusCode = 400;
+            res.end(JSON.stringify({ error: "decrypt_failed", detail: String(e) }));
+            return;
+          }
+        } else {
+          promptTokens = estimatePromptTokens(envelope);
+        }
+
         const hash = prefixHash(envelope);
         const { plan, nextState } = planVllmPrefill(kvByConversation.get(kvKey), promptTokens, hash);
         kvByConversation.set(kvKey, nextState);
