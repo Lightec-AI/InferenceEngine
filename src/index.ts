@@ -7,6 +7,7 @@ export * from "./client-trust.js";
 export * from "./build-mode.js";
 export * from "./crypto/provider.js";
 export * from "./engine/epoch.js";
+export * from "./client/ope-client.js";
 export {
   loadOpeFfi,
   requireOpeFfi,
