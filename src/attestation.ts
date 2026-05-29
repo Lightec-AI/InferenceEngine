@@ -1,10 +1,14 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 
+import { mockAllowed } from "./build-mode.js";
 import type { AttestationBundle, EngineRegisterRequest } from "./protocol/types.js";
 import { bytesToBase64Url } from "./crypto-util.js";
 
-/** Mock quote payload (production: `ope-attest` parses TDX/SEV binary quotes). */
-export interface MockCpuQuotePayload {
+/**
+ * Normalized claims extracted from a CPU TEE quote, regardless of the underlying
+ * verifier (dev mock HMAC, or production TDX / SEV-SNP).
+ */
+export interface QuoteClaims {
   v: 1;
   kind: "tdx" | "sev-snp";
   ed25519_public: string;
@@ -13,6 +17,9 @@ export interface MockCpuQuotePayload {
   vllm: { version: string; binary_sha256: string };
   issued_at: string;
 }
+
+/** @deprecated Use {@link QuoteClaims}; retained for the mock quote builder. */
+export type MockCpuQuotePayload = QuoteClaims;
 
 export interface AttestationPolicy {
   policyId: string;
@@ -61,13 +68,86 @@ export function parseMockCpuQuote(quote: string): MockCpuQuotePayload | null {
   }
 }
 
+// ---------------------------------------------------------------------------
+// CPU quote verifier seam (dev mock vs production).
+// ---------------------------------------------------------------------------
+
+/** Extracts and cryptographically validates claims from a CPU TEE quote. */
+export interface CpuQuoteVerifier {
+  readonly kind: "mock" | "production";
+  /** Returns normalized claims, or `null` if the quote is invalid/unverifiable. */
+  extractClaims(quote: string, expectedKind: "tdx" | "sev-snp"): QuoteClaims | null;
+}
+
+/** Development verifier: validates the HMAC mock quote. Never use in production. */
+export class MockCpuQuoteVerifier implements CpuQuoteVerifier {
+  readonly kind = "mock" as const;
+  extractClaims(quote: string): QuoteClaims | null {
+    return parseMockCpuQuote(quote);
+  }
+}
+
+/**
+ * Production backend hook: a real TDX / SEV-SNP verifier (e.g. wired to OPE
+ * `ope-attest`, Intel PCS/TDX QvL, or AMD SEV-SNP roots). It must verify the quote
+ * signature, TCB, and measurement chain, and return the normalized claims (or `null`).
+ */
+export type ProductionQuoteBackend = (
+  quote: string,
+  expectedKind: "tdx" | "sev-snp",
+) => QuoteClaims | null;
+
+let productionBackend: ProductionQuoteBackend | null = null;
+
+/** Register the real CPU-quote verification backend used in production builds. */
+export function registerProductionQuoteBackend(backend: ProductionQuoteBackend): void {
+  productionBackend = backend;
+}
+
+/** Test/runtime hook: remove any registered production backend. */
+export function clearProductionQuoteBackend(): void {
+  productionBackend = null;
+}
+
+/**
+ * Production verifier: delegates to the registered backend and **fails closed** when
+ * none is configured (no silent fallback to mock).
+ */
+export class ProductionCpuQuoteVerifier implements CpuQuoteVerifier {
+  readonly kind = "production" as const;
+  constructor(private readonly backend: ProductionQuoteBackend | null = productionBackend) {}
+  extractClaims(quote: string, expectedKind: "tdx" | "sev-snp"): QuoteClaims | null {
+    if (!this.backend) {
+      throw new Error(
+        "production attestation backend not configured; call registerProductionQuoteBackend()",
+      );
+    }
+    return this.backend(quote, expectedKind);
+  }
+}
+
+/** Pick the CPU-quote verifier for the current build mode (mock in dev, production otherwise). */
+export function resolveCpuQuoteVerifier(env: NodeJS.ProcessEnv = process.env): CpuQuoteVerifier {
+  return mockAllowed(env) ? new MockCpuQuoteVerifier() : new ProductionCpuQuoteVerifier();
+}
+
 export function verifyAttestationBundle(
   bundle: AttestationBundle,
   policy: AttestationPolicy,
   bind: { ed25519Public: string; tlsClientCertSha256: string },
   nowMs = Date.now(),
+  verifier: CpuQuoteVerifier = resolveCpuQuoteVerifier(),
 ): AttestationVerifyResult {
-  const payload = parseMockCpuQuote(bundle.cpu_tee.quote);
+  let payload: QuoteClaims | null;
+  try {
+    payload = verifier.extractClaims(bundle.cpu_tee.quote, bundle.cpu_tee.kind);
+  } catch (e) {
+    return {
+      ok: false,
+      policyId: policy.policyId,
+      reason: `attestation_backend_error: ${e instanceof Error ? e.message : String(e)}`,
+    };
+  }
   if (!payload) {
     return { ok: false, policyId: policy.policyId, reason: "invalid_cpu_quote" };
   }
