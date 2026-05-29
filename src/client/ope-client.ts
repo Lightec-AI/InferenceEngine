@@ -120,6 +120,13 @@ export class OpeClient {
       throw new Error("expected a client response session but none was returned");
     }
     let finalEnvelope = envelope as unknown as OpeEnvelope;
+
+    // The gateway routes/validates by ephemeral epoch; the OPE `e2e` object does not
+    // carry it, so the client (which learned it from the verified trust bundle) adds it.
+    const e2e = (finalEnvelope.e2e ?? {}) as Record<string, unknown>;
+    e2e.ephemeral_epoch = engine.epochId;
+    finalEnvelope.e2e = e2e;
+
     if (this.opts.signEnvelope) finalEnvelope = this.opts.signEnvelope(finalEnvelope);
 
     return {
