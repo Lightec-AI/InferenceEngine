@@ -19,12 +19,16 @@
     }
   },
   "scripts": {
+    "build:ffi": "node scripts/build-ope-ffi.mjs",
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit"
   },
   "engines": {
     "node": ">=20"
+  },
+  "dependencies": {
+    "koffi": "^2.16.2"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",
