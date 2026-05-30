@@ -5,16 +5,15 @@ import {
   DEFAULT_TEST_ATTESTATION_POLICY,
   parseMockCpuQuote,
   verifyAttestationBundle,
-  verifyRegisterAttestation,
+  verifyAttestedConnectAttestation,
 } from "../src/attestation.js";
-import { generateMockEngineKeys } from "../src/testing/mock-keys.js";
+import { buildAttestedConnectRequest, generateMockEngineKeys } from "../src/testing/mock-keys.js";
 
 describe("attestation", () => {
   it("round-trips mock CPU quote", () => {
     const material = generateMockEngineKeys({
       engineId: "e1",
       models: ["llama3"],
-      inferenceBaseUrl: "https://engine",
     });
     const quote = material.registerRequest.attestation.cpu_tee.quote;
     const parsed = parseMockCpuQuote(quote);
@@ -25,7 +24,6 @@ describe("attestation", () => {
     const material = generateMockEngineKeys({
       engineId: "e1",
       models: ["llama3"],
-      inferenceBaseUrl: "https://engine",
     });
     const bad = buildMockCpuQuote({
       v: 1,
@@ -44,16 +42,16 @@ describe("attestation", () => {
     expect(result.ok).toBe(false);
   });
 
-  it("verifyRegisterAttestation passes for mock engine", () => {
+  it("verifyAttestedConnectAttestation passes for mock engine", () => {
     const material = generateMockEngineKeys({
       engineId: "e1",
       models: ["llama3"],
-      inferenceBaseUrl: "https://engine",
     });
-    const result = verifyRegisterAttestation(
-      material.registerRequest,
-      material.tlsClientCertSha256,
-    );
+    const connect = buildAttestedConnectRequest({
+      material,
+      sessionId: "session-1",
+    });
+    const result = verifyAttestedConnectAttestation(connect);
     expect(result.ok).toBe(true);
   });
 });

@@ -1,7 +1,7 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 
 import { mockAllowed } from "./build-mode.js";
-import type { AttestationBundle, EngineRegisterRequest } from "./protocol/types.js";
+import type { AttestationBundle } from "./protocol/types.js";
 import { bytesToBase64Url } from "./crypto-util.js";
 
 /**
@@ -184,20 +184,6 @@ export function verifyAttestationBundle(
     return { ok: false, policyId: policy.policyId, reason: "verdict_not_pass" };
   }
   return { ok: true, policyId: policy.policyId };
-}
-
-export function verifyRegisterAttestation(
-  req: EngineRegisterRequest,
-  clientCertSha256: string,
-  policy: AttestationPolicy = DEFAULT_TEST_ATTESTATION_POLICY,
-): AttestationVerifyResult {
-  const tls =
-    req.tls_client_cert_sha256?.toLowerCase() ?? clientCertSha256.toLowerCase();
-  return verifyAttestationBundle(
-    req.attestation,
-    policy,
-    { ed25519Public: req.identity.ed25519_public, tlsClientCertSha256: tls },
-  );
 }
 
 export interface AttestedConnectAttestationInput {

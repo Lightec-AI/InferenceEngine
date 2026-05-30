@@ -8,7 +8,7 @@ import type {
   AttestedConnectRequest,
   EngineEphemeralRegisterRequest,
   EngineHybridPublic,
-  EngineRegisterRequest,
+  EngineStartupIdentity,
 } from "../protocol/types.js";
 import { MOCK_MLKEM_ENCAP_B64URL_LEN } from "../protocol/types.js";
 
@@ -17,12 +17,19 @@ export const MOCK_ENGINE_BINARY_SHA256 =
 export const MOCK_VLLM_BINARY_SHA256 =
   "b2c3d4e5f6789012345678abcdef9012345678abcdef9012345678abcdef9012";
 
+export interface MockEngineRegisterPayload {
+  engine_id: string;
+  models: string[];
+  identity: EngineStartupIdentity;
+  attestation: AttestationBundle;
+}
+
 export interface MockEngineKeyMaterial {
   engineId: string;
   ed25519Public: string;
   ed25519PrivateKey: ReturnType<typeof generateKeyPairSync>["privateKey"];
   tlsClientCertSha256: string;
-  registerRequest: EngineRegisterRequest;
+  registerRequest: MockEngineRegisterPayload;
 }
 
 export interface MockEphemeralMaterial {
@@ -95,7 +102,6 @@ export function buildAttestedConnectRequest(args: {
 export function generateMockEngineKeys(args: {
   engineId: string;
   models: string[];
-  inferenceBaseUrl: string;
   tlsClientCertSha256?: string;
 }): MockEngineKeyMaterial {
   const { publicKey, privateKey } = generateKeyPairSync("ed25519");
@@ -103,7 +109,7 @@ export function generateMockEngineKeys(args: {
   const tlsClientCertSha256 = (args.tlsClientCertSha256 ?? randomBytes(32).toString("hex")).toLowerCase();
   const attestation = buildMockAttestationBundle({ ed25519Public, tlsClientCertSha256 });
 
-  const registerRequest: EngineRegisterRequest = {
+  const registerRequest: MockEngineRegisterPayload = {
     engine_id: args.engineId,
     models: args.models,
     identity: {
@@ -112,8 +118,6 @@ export function generateMockEngineKeys(args: {
       ed25519_public: ed25519Public,
     },
     attestation,
-    inference_base_url: args.inferenceBaseUrl,
-    tls_client_cert_sha256: tlsClientCertSha256,
   };
 
   return {

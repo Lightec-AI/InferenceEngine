@@ -71,6 +71,7 @@ export class OpeClient {
       this.opts.attestationPolicy,
       this.opts.tlsClientCertSha256,
       nowMs,
+      { skipTlsCertBinding: true },
     );
     if (!verdict.ok) throw new Error(`trust verification failed: ${verdict.reason}`);
 

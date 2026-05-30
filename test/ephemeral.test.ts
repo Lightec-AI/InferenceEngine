@@ -9,7 +9,6 @@ describe("ephemeral signatures", () => {
     const material = generateMockEngineKeys({
       engineId: "e1",
       models: ["m"],
-      inferenceBaseUrl: "https://x",
     });
     const epoch = generateMockEphemeralEpoch({ engineId: "e1", material });
     expect(
@@ -21,7 +20,6 @@ describe("ephemeral signatures", () => {
     const material = generateMockEngineKeys({
       engineId: "e1",
       models: ["m"],
-      inferenceBaseUrl: "https://x",
     });
     const other = generateKeyPairSync("ed25519");
     const epoch = generateMockEphemeralEpoch({ engineId: "e1", material });

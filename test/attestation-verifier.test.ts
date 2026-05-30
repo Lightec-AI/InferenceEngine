@@ -14,7 +14,6 @@ function fixture() {
   const material = generateMockEngineKeys({
     engineId: "engine-attest",
     models: ["llama3"],
-    inferenceBaseUrl: "",
     tlsClientCertSha256: "attest-cert",
   });
   return {

@@ -46,15 +46,6 @@ export interface AttestationBundle {
   engine: WorkloadMeasurements;
 }
 
-export interface EngineRegisterRequest {
-  engine_id: string;
-  models: string[];
-  identity: EngineStartupIdentity;
-  attestation: AttestationBundle;
-  inference_base_url: string;
-  tls_client_cert_sha256?: string;
-}
-
 export interface EngineEphemeralRegisterRequest {
   engine_id: string;
   epoch_id: string;

@@ -11,6 +11,7 @@ export * from "./client/ope-client.js";
 export * from "./client/gateway-mtls.js";
 export * from "./engine-plane/pool-client.js";
 export { resetMockInferenceKvState } from "./engine-plane/inference-handler.js";
+export type { MockInferenceOptions } from "./engine-plane/inference-handler.js";
 export {
   loadOpeFfi,
   requireOpeFfi,

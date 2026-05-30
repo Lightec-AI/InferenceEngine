@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 
 import { afterEach, describe, expect, it } from "vitest";
 
-import { postJsonEnginePlane } from "../src/client/gateway-mtls.js";
+import { postJsonOverMtls } from "../src/client/gateway-mtls.js";
 
 const FIXTURES = path.join(
   fileURLToPath(new URL(".", import.meta.url)),
@@ -22,7 +22,7 @@ function loadTlsMaterial() {
   };
 }
 
-describe("postJsonEnginePlane", () => {
+describe("postJsonOverMtls", () => {
   let server: https.Server | undefined;
 
   afterEach(async () => {
@@ -66,9 +66,9 @@ describe("postJsonEnginePlane", () => {
     if (!addr || typeof addr === "string") throw new Error("listen failed");
     const baseUrl = `https://127.0.0.1:${addr.port}`;
 
-    const ok = await postJsonEnginePlane({
+    const ok = await postJsonOverMtls({
       baseUrl,
-      path: "/v1/ope/engines/register",
+      path: "/ping",
       body: { ping: "pong" },
       tls: {
         caCertPem: tls.caCertPem,
@@ -81,7 +81,7 @@ describe("postJsonEnginePlane", () => {
 
     await expect(
       new Promise((resolve, reject) => {
-        const url = new URL("/v1/ope/engines/register", baseUrl);
+        const url = new URL("/ping", baseUrl);
         const req = https.request(
           url,
           { method: "POST", ca: tls.caCertPem, rejectUnauthorized: true },

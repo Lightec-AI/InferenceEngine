@@ -73,7 +73,6 @@ describe("OpeClient end-to-end (#3)", () => {
     const material = generateMockEngineKeys({
       engineId: "engine-client",
       models: ["llama3"],
-      inferenceBaseUrl: "",
       tlsClientCertSha256: "client-e2e-cert",
     });
     epoch = createEngineEpoch({
@@ -141,7 +140,6 @@ describe("OpeClient end-to-end (#3)", () => {
     const material = generateMockEngineKeys({
       engineId: "engine-bad-trust",
       models: ["llama3"],
-      inferenceBaseUrl: "",
       tlsClientCertSha256: "cert-a",
     });
     epoch = createEngineEpoch({
@@ -161,7 +159,13 @@ describe("OpeClient end-to-end (#3)", () => {
         ed25519_public: material.ed25519Public,
         identity_signature: epoch.ephemeralRequest.identity_signature,
       },
-      attestation: material.registerRequest.attestation,
+      attestation: {
+        ...material.registerRequest.attestation,
+        engine: {
+          ...material.registerRequest.attestation.engine,
+          binary_sha256: "deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
+        },
+      },
       gateway_cached_at: new Date().toISOString(),
     };
     const started = await startEngineGateway(epoch, trust, "unused");
@@ -169,7 +173,7 @@ describe("OpeClient end-to-end (#3)", () => {
 
     const client = new OpeClient({
       gatewayBaseUrl: started.baseUrl,
-      tlsClientCertSha256: "WRONG-cert", // mismatch → attestation binding fails
+      tlsClientCertSha256: material.tlsClientCertSha256,
       attestationPolicy: DEFAULT_TEST_ATTESTATION_POLICY,
       provider: createRealProvider(),
     });

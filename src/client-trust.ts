@@ -8,12 +8,18 @@ export interface ClientTrustVerifyResult {
   reason?: string;
 }
 
+export interface VerifyEngineTrustBundleOptions {
+  /** Attested TLS engines — identity from quote ed25519, not mTLS cert hash. */
+  skipTlsCertBinding?: boolean;
+}
+
 /** Client-side verification (uses same rules as gateway; for tests and future app). */
 export function verifyEngineTrustBundle(
   bundle: EngineTrustBundle,
   policy: AttestationPolicy,
   tlsClientCertSha256: string,
   nowMs = Date.now(),
+  opts: VerifyEngineTrustBundleOptions = {},
 ): ClientTrustVerifyResult {
   const attest = verifyAttestationBundle(
     bundle.attestation,
@@ -23,6 +29,8 @@ export function verifyEngineTrustBundle(
       tlsClientCertSha256,
     },
     nowMs,
+    undefined,
+    { skipTlsCertBinding: opts.skipTlsCertBinding },
   );
   if (!attest.ok) return { ok: false, reason: attest.reason };
 

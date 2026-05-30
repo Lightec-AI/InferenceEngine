@@ -9,7 +9,6 @@ describe("verifyAttestedConnectAttestation", () => {
     const material = generateMockEngineKeys({
       engineId: "engine-a",
       models: ["llama3"],
-      inferenceBaseUrl: "unused",
     });
     const connect = buildAttestedConnectRequest({
       material,

@@ -8,6 +8,8 @@ import type { MockInferenceDecryptor } from "../server/mock-inference.js";
 export interface MockInferenceOptions {
   decryptor?: MockInferenceDecryptor;
   onInference?: (envelope: OpeEnvelope, prefillTokens: number) => SignedUsageReport;
+  responseBody?: (envelope: OpeEnvelope, prefillTokens: number) => string;
+  delayMs?: number;
 }
 
 interface DecryptedChatPayload {
@@ -73,6 +75,10 @@ export async function runMockInferenceOnEnvelope(
   const { plan, nextState } = planVllmPrefill(kvByConversation.get(kvKey), promptTokens, hash);
   kvByConversation.set(kvKey, nextState);
 
+  if (options.delayMs && options.delayMs > 0) {
+    await new Promise((resolve) => setTimeout(resolve, options.delayMs));
+  }
+
   const signed =
     options.onInference?.(envelope, plan.coldSuffixTokens) ??
     ({
@@ -88,11 +94,13 @@ export async function runMockInferenceOnEnvelope(
     } as SignedUsageReport);
 
   const usageHeader = Buffer.from(JSON.stringify(signed)).toString("base64url");
-  const body = JSON.stringify({
-    object: "chat.completion",
-    choices: [{ message: { role: "assistant", content: "ok" } }],
-    engine_prefill_tokens: plan.coldSuffixTokens,
-  });
+  const body =
+    options.responseBody?.(envelope, plan.coldSuffixTokens) ??
+    JSON.stringify({
+      object: "chat.completion",
+      choices: [{ message: { role: "assistant", content: "ok" } }],
+      engine_prefill_tokens: plan.coldSuffixTokens,
+    });
 
   return {
     status: 200,
