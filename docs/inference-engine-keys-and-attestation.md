@@ -1,8 +1,10 @@
-# Inference engine keys, mTLS, and attestation (design review)
+# Inference engine keys, Attested TLS, and attestation (design review)
 
-Detailed design for **requirement.txt §38–53**: how inference engines obtain and use key material **without KMS or operator access**, how **mTLS + TEE attestation** binds identity to the gateway, how **ephemeral E2E keys** protect long-running engines, and what **clients** must verify before encrypting prompts.
+Detailed design for **requirement.txt §38–53**: how inference engines obtain and use key material **without KMS or operator access**, how **Attested TLS + TEE attestation** binds identity to the gateway, how **ephemeral E2E keys** protect long-running engines, and what **clients** must verify before encrypting prompts.
 
-**Related (TeeChat repo):** `docs/design/confidential-ai-runtime.md` · `docs/design/ope-engine-registry.md` · `docs/design/confidential-ai-multi-turn-trace.md` · OPE `vendor/ope/spec/ope-confidential-ai.md`
+**Current TeeChat (2026-05-30):** Attested TLS + HTTP/2 pool on engine plane — **no** HTTP `POST /register`, **no** `inference_base_url`. Dev uses transport TLS fixtures + mock quotes.
+
+**Related (TeeChat repo):** `docs/design/confidential-ai-runtime.md` · `docs/design/ope-engine-registry.md` · `docs/design/engine-plane-attested-tls.md` · OPE `vendor/ope/spec/ope-confidential-ai.md`
 
 ---
 
@@ -13,7 +15,7 @@ Detailed design for **requirement.txt §38–53**: how inference engines obtain 
 | Operators must not know engine private keys | Keys generated **inside** CPU TEE (TDX or SEV) at process start; private material never written to disk or config |
 | No KMS | No external key import; optional **internal** attested CA only issues **TLS client cert** derived inside TEE |
 | Long-running process | **Ephemeral** hybrid E2E keys rotated in memory; **startup identity** only signs ephemerals and usage |
-| Gateway trust | **mTLS** + OPE-verified attestation quotes bind TLS cert + `ed25519_public` before registry |
+| Gateway trust | **Attested TLS** + OPE-verified attestation at connect; registry upsert (no HTTP register) |
 | Client trust | Gateway publishes **verifiable bundle** (TEE + GPU + vLLM + engine hashes + signed ephemeral keys) |
 
 **Split of ownership**
@@ -21,8 +23,8 @@ Detailed design for **requirement.txt §38–53**: how inference engines obtain 
 | Concern | OPE library (`vendor/ope`) | TeeChat gateway | Inference engine deploy |
 |---------|---------------------------|-----------------|-------------------------|
 | Hybrid E2E math, envelope | `ope-e2e`, `ope-envelope`, `ope-ffi` (C ABI) | Forward opaque | Decrypt / encrypt (via `ope-ffi`/koffi) |
-| Quote parse/verify (TDX/SEV/GPU) | **`ope-attest`** (real backend to implement) | Policy + cache verdicts; pluggable verifier seam | Produce quotes at startup/register |
-| mTLS credential binding | Attestation extensions + verify APIs | Registry + AWF thumbprint | Generate TLS client key in TEE |
+| Quote parse/verify (TDX/SEV/GPU) | **`ope-attest`** (real backend to implement) | Policy + cache verdicts; pluggable verifier seam | Produce quotes at connect |
+| Attested TLS session | Attestation extensions + verify APIs | `server/gateway/attested-tls/` | `createEnginePlanePoolClient` |
 | HTTP registry, affinity, billing | — | TeeChat `server/confidential-ai/` | This package (`src/`) |
 
 ---
@@ -33,7 +35,7 @@ Detailed design for **requirement.txt §38–53**: how inference engines obtain 
 ┌─────────────────────────────────────────────────────────────────┐
 │  Startup identity (lifetime of process, RAM only)                 │
 │  • ed25519_identity_sk  → sign ephemerals, usage reports        │
-│  • tls_client_sk         → mTLS client authentication to gateway  │
+│  • tls_client_sk         → Attested TLS transport (dev: fixture PEM) │
 │  • (optional) quote_sealing_key — TEE-specific, not exported      │
 └───────────────────────────────┬─────────────────────────────────┘
                                 │ signs
@@ -60,7 +62,7 @@ Detailed design for **requirement.txt §38–53**: how inference engines obtain 
 
 **Prohibited:** writing keys to volume, environment variables, Kubernetes secrets, operator-visible debug endpoints, or KMS wrap.
 
-**Gateway first contact:** identity public keys are learned only after **verified mTLS + attestation** (§4), not from operator-supplied JSON alone.
+**Gateway first contact:** identity public keys are learned only after **verified Attested TLS connect** (§4), not from operator-supplied JSON alone.
 
 ### 2.2 Ephemeral E2E keys (requirement §4)
 
@@ -72,7 +74,7 @@ Detailed design for **requirement.txt §38–53**: how inference engines obtain 
 2. Generate fresh **ML-KEM-768** decaps key + **X25519** key pair (same hybrid as OPE `X25519MLKEM768`).
 3. Construct `EphemeralEngineIdentity` public blob (see §6).
 4. **Sign** canonical bytes with `ed25519_identity_sk`.
-5. `POST` registration to gateway (§5) over existing mTLS connection.
+5. `POST /v1/ope/control/ephemeral` on the Attested h2 session (§5).
 
 **Client encryption target:** `enc=e2e-hybrid-pq` uses **`engine_mlkem_encap` / `engine_x25519` from the active ephemeral record**, not a multi-month static key. OPE spec §3 “long-lived” is interpreted in TeeChat as **identity binding** (Ed25519 + attestation), not immutability of ML-KEM encap key.
 
@@ -94,43 +96,32 @@ The OPE `e2e` object does not itself carry the epoch id; the client (`OpeClient.
 
 ---
 
-## 4. Engine → Gateway: mTLS + attestation (requirements §2–3)
+## 4. Engine → Gateway: Attested TLS + HTTP/2 (requirements §2–3)
 
-### 4.1 Connection establishment
+### 4.1 Connection establishment (current)
 
 ```mermaid
 sequenceDiagram
   participant E as Inference engine (TEE)
-  participant AWF as AWF / mesh (optional)
-  participant G as Gateway
+  participant G as Gateway engine plane
 
-  E->>E: Generate startup identity + TLS client key (RAM)
-  E->>E: ope_attest_build_quote(measurements, identity_pubkeys)
-  E->>AWF: TLS ClientHello + client cert
-  AWF->>G: Forward mTLS (inject X-OPE-Engine-Client-Cert-Sha256)
-  G->>G: Standard TLS verify server + client cert chain
-  G->>G: ope_attest_verify_quote(quote, expected_measurements_policy)
-  G->>G: Bind: cert_sha256 ↔ ed25519_public ↔ engine_measurements
-  E->>G: POST /v1/ope/engines/register (identity + attestation)
-  G-->>E: 201 RegisteredEngine
+  E->>E: Generate startup identity (RAM)
+  E->>G: Attested TLS h2 POST /v1/ope/control/connect
+  G->>G: verifyAttestedConnectAttestation + upsert registry
+  E->>G: POST /v1/ope/control/ephemeral (signed epoch)
+  loop Pool work
+    G->>E: GET /v1/ope/work/pull → opaque envelope
+    E->>G: POST /v1/ope/inference/result + usage report
+  end
 ```
 
-**OPE library responsibilities (`ope-attest`):**
+**Removed (2026-05-30):** `POST /v1/ope/engines/register`, cert-hash headers, `inference_base_url`, gateway-outbound fetch.
 
-| API (conceptual) | Role |
-|----------------|------|
-| `build_cpu_tee_quote(bindings)` | Wrap Intel TDX / AMD SEV-SNP evidence |
-| `build_gpu_tee_evidence(bindings)` | NV Confidential Computing or equivalent GPU attestation blob |
-| `bind_identity_to_quote(quote, ed25519_pub, tls_spki_hash)` | Custom claim / `REPORT_DATA` layout |
-| `verify_quote(quote, policy)` | Return `AttestationVerdict { ok, claims, expiry }` |
-| `verify_gpu_evidence(gpu_blob, policy)` | GPU TEE measurements |
+**TeeChat gateway:**
 
-**TeeChat gateway responsibilities:**
-
-- Terminate or trust AWF-injected `X-OPE-Engine-Client-Cert-Sha256`.
-- Call OPE verify **before** accepting registry body.
-- Store **verdict + policy version**, not long-term private keys.
-- Reject register if quote identity does not match JSON `identity.ed25519_public` or TLS cert binding.
+- Verify attestation at connect (`verifyAttestedConnectAttestation`).
+- Store verdict + policy version; session pool for sticky dispatch.
+- Reject connect if quote identity does not match `identity.ed25519_public`.
 
 **Measurements in quote (engine builds):**
 
@@ -147,11 +138,11 @@ sequenceDiagram
 
 ## 5. Ephemeral key registration (requirement §4)
 
-After mTLS session exists, engine pushes **rotating E2E keys** (may repeat on schedule without full re-register):
+On the **same Attested h2 session**, engine pushes rotating E2E keys:
 
 ```http
-POST /v1/ope/engines/register
-POST /v1/ope/engines/{engine_id}/ephemeral   (proposed)
+POST /v1/ope/control/ephemeral
+X-OPE-Session-Id: <pool session id>
 ```
 
 **Proposed body (`EngineEphemeralRegister`):**
@@ -179,7 +170,7 @@ POST /v1/ope/engines/{engine_id}/ephemeral   (proposed)
 
 **Gateway:**
 
-- Verifies `identity_signature` with stored `ed25519_public` from initial register.
+- Verifies `identity_signature` with stored `ed25519_public` from attested connect.
 - Re-validates attestation if epoch rotation exceeds policy staleness.
 - Maintains `active_epoch` per `engine_id` (+ optional overlap list for grace period).
 - Does **not** store any private key.
@@ -319,7 +310,7 @@ sequenceDiagram
 | Event | Action |
 |-------|--------|
 | Scheduled rotation | Engine registers new `epoch_id` **before** `not_after`; gateway keeps **N=2** active epochs for 15 min overlap |
-| Process restart | New startup identity → full mTLS re-register; all prior ephemerals invalidated |
+| Process restart | New attested connect + ephemeral; prior pool sessions invalidated |
 | Attestation failure | Gateway marks engine unhealthy; no new client trust |
 | Compromise suspicion | Operator drains engine from LB only — **cannot** rotate keys without new attested instance |
 
@@ -338,7 +329,8 @@ sequenceDiagram
 | Ephemeral signing verify | **Implemented** | `src/ephemeral.ts` |
 | Client trust bundle | **Implemented** | `src/client-trust.ts` |
 | Mock engine keys (dev/tests) | **Implemented** | `src/testing/mock-keys.ts` |
-| Gateway register / trust / chat | **Implemented** | TeeChat `server/confidential-ai/` |
+| Attested connect + pool client | **Implemented** | `src/engine-plane/pool-client.ts`, TeeChat `attested-tls/` |
+| Gateway trust / chat | **Implemented** | TeeChat `server/confidential-ai/` |
 | Production TDX/SEV/GPU quote **backend** | **Planned** | wire `ope-attest` via `registerProductionQuoteBackend` |
 | Browser/mobile WASM crypto binding | **Planned** | `ope-ffi` WASM build |
 
@@ -365,13 +357,13 @@ Implement in **`vendor/ope`** only:
 Implement in **TeeChat gateway:**
 
 - Registry schema, `/trust` API, epoch table, policy IDs.
-- mTLS integration with AWF headers.
+- Attested TLS engine plane (`server/gateway/attested-tls/`).
 
-Implement in **inference engine binary** (separate repo/image):
+Implement in **inference engine binary**:
 
 - TEE keygen at boot.
 - vLLM invocation + OPE decrypt/encrypt.
-- Register + rotate ephemerals.
+- Attested pool dial + ephemeral control on h2 session.
 
 ---
 
