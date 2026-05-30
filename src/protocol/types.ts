@@ -129,7 +129,38 @@ export interface OpeEnvelope {
 
 export const HEADER_ENGINE_CLIENT_CERT = "x-ope-engine-client-cert-sha256";
 export const HEADER_USAGE_REPORT = "x-ope-usage-report";
+export const HEADER_OPE_GATEWAY_ID = "x-ope-gateway-id";
+export const HEADER_OPE_EPHEMERAL_EPOCH = "x-ope-ephemeral-epoch";
+export const HEADER_OPE_CONVERSATION_ID = "x-ope-conversation-id";
+export const HEADER_OPE_REQUEST_ID = "x-ope-request-id";
+export const HEADER_OPE_SESSION_ID = "x-ope-session-id";
 export const CONTENT_TYPE_OPE_JSON = "application/ope+json";
 export const INFERENCE_PATH = "/v1/ope/inference";
+
+/** Attested engine plane (HTTP/2 on TLS). */
+export const ENGINE_PLANE_PATH_CONNECT = "/v1/ope/control/connect";
+export const ENGINE_PLANE_PATH_EPHEMERAL = "/v1/ope/control/ephemeral";
+export const ENGINE_PLANE_PATH_POOL = "/v1/ope/control/pool";
+export const ENGINE_PLANE_PATH_WORK_PULL = "/v1/ope/work/pull";
+
+export interface AttestedConnectRequest {
+  session_id: string;
+  engine_id: string;
+  models: string[];
+  identity: EngineStartupIdentity;
+  attestation: AttestationBundle;
+  /** Desired pool width reported by engine supervisor. */
+  pool_target_size?: number;
+}
+
+export interface AttestedConnectResponse {
+  ok: boolean;
+  gateway_attestation?: AttestationBundle;
+  pool_target_ack?: number;
+}
+
+export interface AttestedPoolResizeRequest {
+  pool_target_size: number;
+}
 
 export const MOCK_MLKEM_ENCAP_B64URL_LEN = 1184;

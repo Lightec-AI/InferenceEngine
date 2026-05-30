@@ -137,6 +137,7 @@ export function verifyAttestationBundle(
   bind: { ed25519Public: string; tlsClientCertSha256: string },
   nowMs = Date.now(),
   verifier: CpuQuoteVerifier = resolveCpuQuoteVerifier(),
+  opts: { skipTlsCertBinding?: boolean } = {},
 ): AttestationVerifyResult {
   let payload: QuoteClaims | null;
   try {
@@ -157,7 +158,10 @@ export function verifyAttestationBundle(
   if (payload.ed25519_public !== bind.ed25519Public) {
     return { ok: false, policyId: policy.policyId, reason: "ed25519_mismatch" };
   }
-  if (payload.tls_client_cert_sha256.toLowerCase() !== bind.tlsClientCertSha256.toLowerCase()) {
+  if (
+    !opts.skipTlsCertBinding &&
+    payload.tls_client_cert_sha256.toLowerCase() !== bind.tlsClientCertSha256.toLowerCase()
+  ) {
     return { ok: false, policyId: policy.policyId, reason: "tls_cert_mismatch" };
   }
   const issued = Date.parse(payload.issued_at);
@@ -193,5 +197,39 @@ export function verifyRegisterAttestation(
     req.attestation,
     policy,
     { ed25519Public: req.identity.ed25519_public, tlsClientCertSha256: tls },
+  );
+}
+
+export interface AttestedConnectAttestationInput {
+  engine_id: string;
+  models: string[];
+  identity: { engine_id: string; ed25519_public: string };
+  attestation: AttestationBundle;
+}
+
+/** Attested TLS connect — identity bound via quote ed25519, not mTLS cert hash. */
+export function verifyAttestedConnectAttestation(
+  req: AttestedConnectAttestationInput,
+  policy: AttestationPolicy = DEFAULT_TEST_ATTESTATION_POLICY,
+): AttestationVerifyResult {
+  if (!req.engine_id.trim()) {
+    return { ok: false, policyId: policy.policyId, reason: "engine_id_required" };
+  }
+  if (!req.models.length) {
+    return { ok: false, policyId: policy.policyId, reason: "models_required" };
+  }
+  if (req.identity.engine_id !== req.engine_id) {
+    return { ok: false, policyId: policy.policyId, reason: "identity_engine_id_mismatch" };
+  }
+  if (!req.identity.ed25519_public.trim()) {
+    return { ok: false, policyId: policy.policyId, reason: "ed25519_required" };
+  }
+  return verifyAttestationBundle(
+    req.attestation,
+    policy,
+    { ed25519Public: req.identity.ed25519_public, tlsClientCertSha256: "" },
+    Date.now(),
+    resolveCpuQuoteVerifier(),
+    { skipTlsCertBinding: true },
   );
 }

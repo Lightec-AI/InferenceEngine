@@ -5,6 +5,7 @@ import { bytesToBase64Url } from "../crypto-util.js";
 import { ephemeralSigningBytes } from "../ephemeral.js";
 import type {
   AttestationBundle,
+  AttestedConnectRequest,
   EngineEphemeralRegisterRequest,
   EngineHybridPublic,
   EngineRegisterRequest,
@@ -72,6 +73,21 @@ export function buildMockAttestationBundle(args: {
     },
     vllm: payload.vllm,
     engine: payload.engine,
+  };
+}
+
+export function buildAttestedConnectRequest(args: {
+  material: MockEngineKeyMaterial;
+  sessionId: string;
+  poolTargetSize?: number;
+}): AttestedConnectRequest {
+  return {
+    session_id: args.sessionId,
+    engine_id: args.material.engineId,
+    models: args.material.registerRequest.models,
+    identity: args.material.registerRequest.identity,
+    attestation: args.material.registerRequest.attestation,
+    pool_target_size: args.poolTargetSize,
   };
 }
 
