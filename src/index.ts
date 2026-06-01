@@ -20,6 +20,11 @@ export {
   type OpeFfi,
   type EngineIdentityFull,
 } from "./native/ope-ffi.js";
+export { loadOpeWasm, __resetOpeWasmCacheForTests } from "./native/ope-wasm.js";
+export {
+  createWasmClientCryptoProvider,
+  type WasmOpeClientFfi,
+} from "./crypto/wasm-client-provider.js";
 export {
   DEV_VECTOR_001_PUBLIC_KEY_HEX,
   DEV_VECTOR_001_SECRET_SEED,

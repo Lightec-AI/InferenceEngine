@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 
 import { conversationKvKey, planVllmPrefill } from "../prefill.js";
 import type { OpeEnvelope, SignedUsageReport } from "../protocol/types.js";
-import { CONTENT_TYPE_OPE_JSON, HEADER_USAGE_REPORT } from "../protocol/types.js";
+import { CONTENT_TYPE_OPE_JSON } from "../protocol/types.js";
 import { vllmConfigFromEnv } from "../upstream/vllm-chat.js";
 import type { MockInferenceDecryptor } from "../server/mock-inference.js";
 import { runOpeInferenceOnEnvelope, type OpeInferenceOptions } from "../server/ope-inference.js";
@@ -67,7 +67,7 @@ export async function runMockInferenceOnEnvelope(
       decryptor: options.decryptor,
       vllm,
       onUsage: options.onInference
-        ? (env, prefill, completion) => options.onInference!(env, prefill)
+        ? (env, prefill, _completion) => options.onInference!(env, prefill)
         : undefined,
     });
   }

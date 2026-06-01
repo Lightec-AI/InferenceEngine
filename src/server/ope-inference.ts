@@ -1,6 +1,5 @@
 import { createHash } from "node:crypto";
 
-import type { CryptoProvider } from "../crypto/provider.js";
 import { conversationKvKey, planVllmPrefill } from "../prefill.js";
 import type { OpeEnvelope, SignedUsageReport } from "../protocol/types.js";
 import { CONTENT_TYPE_OPE_JSON } from "../protocol/types.js";

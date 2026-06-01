@@ -20,6 +20,7 @@
   },
   "scripts": {
     "build:ffi": "node scripts/build-ope-ffi.mjs",
+    "build:wasm": "node scripts/build-ope-wasm.mjs",
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit"

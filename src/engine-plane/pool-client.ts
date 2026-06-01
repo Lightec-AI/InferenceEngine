@@ -1,8 +1,7 @@
-import http2, { type ClientHttp2Session, type ClientHttp2Stream } from "node:http2";
+import http2, { type ClientHttp2Session } from "node:http2";
 import { randomUUID } from "node:crypto";
 
 import {
-  CONTENT_TYPE_OPE_JSON,
   ENGINE_PLANE_PATH_CONNECT,
   ENGINE_PLANE_PATH_EPHEMERAL,
   ENGINE_PLANE_PATH_POOL,
@@ -12,7 +11,6 @@ import {
   HEADER_USAGE_REPORT,
   INFERENCE_PATH,
   type AttestedConnectRequest,
-  type AttestedConnectResponse,
   type AttestedPoolResizeRequest,
   type EngineEphemeralRegisterRequest,
   type OpeEnvelope,
@@ -123,8 +121,6 @@ async function openPooledConnection(
     session.close();
     throw new Error(`attested connect failed: ${connectRes.status} ${JSON.stringify(connectRes.json)}`);
   }
-  void connectRes.json as AttestedConnectResponse;
-
   return session;
 }
 
