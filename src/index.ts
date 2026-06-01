@@ -21,6 +21,13 @@ export {
   type EngineIdentityFull,
 } from "./native/ope-ffi.js";
 export {
+  DEV_VECTOR_001_PUBLIC_KEY_HEX,
+  DEV_VECTOR_001_SECRET_SEED,
+  devVector001PublicKey,
+  signEnvelopeWithSecretKey,
+  verifyGatewayOpaqueEnvelope,
+} from "./native/envelope-ffi.js";
+export {
   createMockInferenceServer,
   type MockInferenceDecryptor,
 } from "./server/mock-inference.js";

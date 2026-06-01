@@ -68,6 +68,13 @@ export interface OpeFfi {
     ciphertextB64: string,
   ): Buffer;
   clientSessionFree(clientSession: number): void;
+  envelopeSignAlloc(secretKey: Buffer, json: string): string;
+  envelopeVerifyGatewayOpaque(
+    publicKey: Buffer,
+    json: string,
+    recipient: string | null,
+    maxSkewSecs: number,
+  ): void;
 }
 
 export class OpeFfiError extends Error {
@@ -189,6 +196,13 @@ interface NativeBindings {
     ciphertextB64: string,
   ) => string | null;
   ope_e2e_client_session_free: (clientSession: number) => number;
+  ope_envelope_sign_alloc: (secretKey: Buffer, json: string) => string | null;
+  ope_envelope_verify_gateway_opaque: (
+    publicKey: Buffer,
+    json: string,
+    recipient: string | null,
+    maxSkewSecs: number,
+  ) => number;
 }
 
 let cached: OpeFfi | null | undefined;
@@ -254,7 +268,13 @@ export function loadOpeFfi(env: NodeJS.ProcessEnv = process.env): OpeFfi | null 
     ope_e2e_client_session_free: lib.func(
       "int ope_e2e_client_session_free(uint64_t client_session)",
     ),
+    ope_envelope_sign_alloc: lib.func("ope_envelope_sign_alloc", HeapJson, ["str", "str"]),
+    ope_envelope_verify_gateway_opaque: lib.func(
+      "int ope_envelope_verify_gateway_opaque(void *pk, str json, str recipient, uint32 max_skew)",
+    ),
   };
+
+  const OPE_OK = 0;
 
   function lastError(): string {
     try {
@@ -332,6 +352,20 @@ export function loadOpeFfi(env: NodeJS.ProcessEnv = process.env): OpeFfi | null 
     },
     clientSessionFree(clientSession) {
       native.ope_e2e_client_session_free(clientSession);
+    },
+    envelopeSignAlloc(secretKey, json) {
+      const out = native.ope_envelope_sign_alloc(secretKey, json);
+      if (!out) throw new OpeFfiError(`envelopeSignAlloc: ${lastError()}`);
+      return out;
+    },
+    envelopeVerifyGatewayOpaque(publicKey, json, recipient, maxSkewSecs) {
+      const rc = native.ope_envelope_verify_gateway_opaque(
+        publicKey,
+        json,
+        recipient,
+        maxSkewSecs,
+      );
+      if (rc !== OPE_OK) throw new OpeFfiError(`envelopeVerifyGatewayOpaque: ${lastError()}`);
     },
   };
 
