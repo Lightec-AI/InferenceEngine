@@ -31,3 +31,5 @@ export {
   createMockInferenceServer,
   type MockInferenceDecryptor,
 } from "./server/mock-inference.js";
+export { runOpeInferenceOnEnvelope, resetOpeInferenceKvState } from "./server/ope-inference.js";
+export { streamVllmChatCompletion, vllmConfigFromEnv } from "./upstream/vllm-chat.js";

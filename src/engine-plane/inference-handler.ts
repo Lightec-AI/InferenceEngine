@@ -3,13 +3,17 @@ import { createHash } from "node:crypto";
 import { conversationKvKey, planVllmPrefill } from "../prefill.js";
 import type { OpeEnvelope, SignedUsageReport } from "../protocol/types.js";
 import { CONTENT_TYPE_OPE_JSON, HEADER_USAGE_REPORT } from "../protocol/types.js";
+import { vllmConfigFromEnv } from "../upstream/vllm-chat.js";
 import type { MockInferenceDecryptor } from "../server/mock-inference.js";
+import { runOpeInferenceOnEnvelope, type OpeInferenceOptions } from "../server/ope-inference.js";
 
 export interface MockInferenceOptions {
   decryptor?: MockInferenceDecryptor;
   onInference?: (envelope: OpeEnvelope, prefillTokens: number) => SignedUsageReport;
   responseBody?: (envelope: OpeEnvelope, prefillTokens: number) => string;
   delayMs?: number;
+  /** When set (or `VLLM_BASE_URL` env), use real vLLM upstream instead of mock JSON body. */
+  vllm?: OpeInferenceOptions["vllm"];
 }
 
 interface DecryptedChatPayload {
@@ -48,6 +52,26 @@ export async function runMockInferenceOnEnvelope(
   body: string;
   usageHeader?: string;
 }> {
+  const vllmEnv = vllmConfigFromEnv();
+  const vllm =
+    options.vllm ??
+    (vllmEnv
+      ? {
+          baseUrl: vllmEnv.baseUrl,
+          apiKey: vllmEnv.apiKey,
+        }
+      : undefined);
+
+  if (vllm?.baseUrl && options.decryptor) {
+    return runOpeInferenceOnEnvelope(envelope, {
+      decryptor: options.decryptor,
+      vllm,
+      onUsage: options.onInference
+        ? (env, prefill, completion) => options.onInference!(env, prefill)
+        : undefined,
+    });
+  }
+
   const convId = envelope.meta?.conversation_id ?? "conv-test";
   const model = envelope.meta?.model ?? "unknown";
   const kvKey = conversationKvKey(convId, model);
