@@ -16,6 +16,11 @@ import {
   type OpeEnvelope,
 } from "../protocol/types.js";
 import type { GatewayMtlsTlsMaterial } from "../client/gateway-mtls.js";
+import {
+  verifyPlatformAttestationBundle,
+  type AttestationPolicy,
+  type PlatformAttestationPolicy,
+} from "../attestation.js";
 import { runMockInferenceOnEnvelope, type MockInferenceOptions } from "./inference-handler.js";
 
 export const ENGINE_PLANE_PATH_INFERENCE_RESULT = `${INFERENCE_PATH}/result`;
@@ -27,6 +32,14 @@ export interface EnginePlanePoolClientOptions {
   poolTargetSize: number;
   inference?: MockInferenceOptions;
   onError?: (err: Error) => void;
+  /** When set, engine verifies gateway platform attestation at connect (SEC-029). */
+  gatewayPlatformVerify?: {
+    enginePolicy: AttestationPolicy;
+    platformPolicy: PlatformAttestationPolicy;
+    gatewayBinarySha256: string;
+    skillHubBinarySha256: string;
+    gatewayEd25519Public: string;
+  };
 }
 
 export interface EnginePlanePoolClient {
@@ -121,6 +134,32 @@ async function openPooledConnection(
     session.close();
     throw new Error(`attested connect failed: ${connectRes.status} ${JSON.stringify(connectRes.json)}`);
   }
+
+  const verify = opts.gatewayPlatformVerify;
+  if (verify) {
+    const body = connectRes.json as {
+      gateway_attestation?: import("../protocol/types.js").AttestationBundle;
+    };
+    if (!body.gateway_attestation) {
+      session.close();
+      throw new Error("gateway_attestation_missing");
+    }
+    const verdict = verifyPlatformAttestationBundle(
+      body.gateway_attestation,
+      verify.enginePolicy,
+      verify.platformPolicy,
+      {
+        gatewayBinarySha256: verify.gatewayBinarySha256,
+        skillHubBinarySha256: verify.skillHubBinarySha256,
+        ed25519Public: verify.gatewayEd25519Public,
+      },
+    );
+    if (!verdict.ok) {
+      session.close();
+      throw new Error(`gateway_platform_attestation_failed: ${verdict.reason ?? "unknown"}`);
+    }
+  }
+
   return session;
 }
 

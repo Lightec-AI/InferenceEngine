@@ -1,8 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import { verifyAttestedConnectAttestation } from "../attestation.js";
-import { generateMockEngineKeys } from "../testing/mock-keys.js";
-import { buildAttestedConnectRequest } from "../testing/mock-keys.js";
+import { verifyAttestedConnectAttestation } from "../src/attestation.js";
+import { buildAttestedConnectRequest, generateMockEngineKeys } from "../src/testing/mock-keys.js";
 
 describe("verifyAttestedConnectAttestation", () => {
   it("accepts mock connect without mTLS cert binding", () => {

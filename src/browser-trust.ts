@@ -285,6 +285,8 @@ function isEpochActive(notBefore: string, notAfter: string, nowMs: number): bool
 
 export interface VerifyEngineTrustBundleBrowserOptions {
   skipTlsCertBinding?: boolean;
+  /** Platform attestation (SEC-029) has no ephemeral epoch signature. */
+  skipIdentitySignature?: boolean;
 }
 
 /** Client-side trust bundle verification for browsers (dev mock attestation). */
@@ -321,8 +323,12 @@ export async function verifyEngineTrustBundleBrowserDetailed(
 
   if (!attest.ok) return { ok: false, reason: attest.reason, evidence };
 
-  if (!isEpochActive(bundle.not_before, bundle.not_after, nowMs)) {
+  if (!opts.skipIdentitySignature && !isEpochActive(bundle.not_before, bundle.not_after, nowMs)) {
     return { ok: false, reason: "epoch_expired", evidence };
+  }
+
+  if (opts.skipIdentitySignature) {
+    return { ok: true, evidence };
   }
 
   const sigOk = await verifyEphemeralIdentitySignatureBrowser(

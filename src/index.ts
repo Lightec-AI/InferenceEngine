@@ -1,6 +1,7 @@
 export * from "./protocol/types.js";
 export * from "./prefill.js";
 export * from "./attestation.js";
+export { buildMockCpuQuote } from "./attestation.js";
 export {
   parseAttestationPolicyJson,
   loadAttestationPolicyFromFile,

@@ -28,6 +28,14 @@ export interface AttestationPolicy {
   maxQuoteAgeMs: number;
 }
 
+/** Gateway / Skill Hub platform binary allowlists (SEC-029). */
+export interface PlatformAttestationPolicy {
+  policyId: string;
+  allowedGatewayBinarySha256: ReadonlySet<string>;
+  allowedSkillHubBinarySha256: ReadonlySet<string>;
+  maxQuoteAgeMs: number;
+}
+
 export interface AttestationVerifyResult {
   ok: boolean;
   policyId: string;
@@ -191,6 +199,55 @@ export interface AttestedConnectAttestationInput {
   models: string[];
   identity: { engine_id: string; ed25519_public: string };
   attestation: AttestationBundle;
+}
+
+/** Verify gateway platform attestation returned at engine connect (SEC-029). */
+export function verifyPlatformAttestationBundle(
+  bundle: AttestationBundle,
+  enginePolicy: AttestationPolicy,
+  platformPolicy: PlatformAttestationPolicy,
+  bind: {
+    gatewayBinarySha256: string;
+    skillHubBinarySha256: string;
+    ed25519Public: string;
+  },
+  nowMs = Date.now(),
+): AttestationVerifyResult {
+  const gw = bind.gatewayBinarySha256.trim().toLowerCase();
+  const sh = bind.skillHubBinarySha256.trim().toLowerCase();
+  if (
+    platformPolicy.allowedGatewayBinarySha256.size > 0 &&
+    !platformPolicy.allowedGatewayBinarySha256.has(gw)
+  ) {
+    return { ok: false, policyId: platformPolicy.policyId, reason: "gateway_hash_not_allowed" };
+  }
+  if (
+    platformPolicy.allowedSkillHubBinarySha256.size > 0 &&
+    !platformPolicy.allowedSkillHubBinarySha256.has(sh)
+  ) {
+    return { ok: false, policyId: platformPolicy.policyId, reason: "skill_hub_hash_not_allowed" };
+  }
+  const quotePolicy: AttestationPolicy = {
+    ...enginePolicy,
+    allowedEngineBinarySha256: new Set([gw, ...enginePolicy.allowedEngineBinarySha256]),
+    allowedVllmBinarySha256: new Set([sh, ...enginePolicy.allowedVllmBinarySha256]),
+  };
+  const verdict = verifyAttestationBundle(
+    bundle,
+    quotePolicy,
+    { ed25519Public: bind.ed25519Public, tlsClientCertSha256: "" },
+    nowMs,
+    resolveCpuQuoteVerifier(),
+    { skipTlsCertBinding: true },
+  );
+  if (!verdict.ok) return verdict;
+  if (bundle.engine.binary_sha256.toLowerCase() !== gw) {
+    return { ok: false, policyId: platformPolicy.policyId, reason: "gateway_hash_bundle_mismatch" };
+  }
+  if (bundle.vllm.binary_sha256.toLowerCase() !== sh) {
+    return { ok: false, policyId: platformPolicy.policyId, reason: "skill_hub_hash_bundle_mismatch" };
+  }
+  return { ok: true, policyId: platformPolicy.policyId };
 }
 
 /** Attested TLS connect — identity bound via quote ed25519, not mTLS cert hash. */
