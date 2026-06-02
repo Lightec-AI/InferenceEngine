@@ -9,7 +9,11 @@ import { runOpeInferenceOnEnvelope, type OpeInferenceOptions } from "../server/o
 
 export interface MockInferenceOptions {
   decryptor?: MockInferenceDecryptor;
-  onInference?: (envelope: OpeEnvelope, prefillTokens: number) => SignedUsageReport;
+  onInference?: (
+    envelope: OpeEnvelope,
+    prefillTokens: number,
+    completionTokens?: number,
+  ) => SignedUsageReport;
   responseBody?: (envelope: OpeEnvelope, prefillTokens: number) => string;
   delayMs?: number;
   /** When set (or `VLLM_BASE_URL` env), use real vLLM upstream instead of mock JSON body. */
@@ -67,7 +71,7 @@ export async function runMockInferenceOnEnvelope(
       decryptor: options.decryptor,
       vllm,
       onUsage: options.onInference
-        ? (env, prefill, _completion) => options.onInference!(env, prefill)
+        ? (env, prefill, completion) => options.onInference!(env, prefill, completion)
         : undefined,
     });
   }

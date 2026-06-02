@@ -37,4 +37,15 @@ export {
   type MockInferenceDecryptor,
 } from "./server/mock-inference.js";
 export { runOpeInferenceOnEnvelope, resetOpeInferenceKvState } from "./server/ope-inference.js";
-export { streamVllmChatCompletion, vllmConfigFromEnv } from "./upstream/vllm-chat.js";
+export {
+  openAiChatCompletionsUrl,
+  streamVllmChatCompletion,
+  vllmConfigFromEnv,
+} from "./upstream/vllm-chat.js";
+export {
+  DEFAULT_OLLAMA_OPENAI_BASE_URL,
+  pickUpstreamModel,
+  probeOllamaUpstream,
+  resolveOpenAiCompatibleUpstream,
+  type OpenAiCompatibleUpstreamProbe,
+} from "./upstream/openai-compatible-upstream.js";

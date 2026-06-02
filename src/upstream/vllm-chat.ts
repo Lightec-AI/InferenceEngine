@@ -14,7 +14,14 @@ export interface VllmStreamOptions {
 }
 
 function normalizeBaseUrl(baseUrl: string): string {
-  return baseUrl.replace(/\/$/, "");
+  return baseUrl.trim().replace(/\/+$/, "");
+}
+
+/** OpenAI-compatible chat completions URL (base may be `http://host` or `http://host/v1`). */
+export function openAiChatCompletionsUrl(baseUrl: string): string {
+  const base = normalizeBaseUrl(baseUrl);
+  if (base.endsWith("/v1")) return `${base}/chat/completions`;
+  return `${base}/v1/chat/completions`;
 }
 
 /** Stream completion text deltas from an OpenAI-compatible vLLM `/v1/chat/completions`. */
@@ -22,7 +29,7 @@ export async function* streamVllmChatCompletion(
   opts: VllmStreamOptions,
 ): AsyncGenerator<string> {
   const fetchImpl = opts.fetchImpl ?? fetch;
-  const url = `${normalizeBaseUrl(opts.baseUrl)}/v1/chat/completions`;
+  const url = openAiChatCompletionsUrl(opts.baseUrl);
   const headers: Record<string, string> = { "Content-Type": "application/json" };
   if (opts.apiKey?.trim()) headers.Authorization = `Bearer ${opts.apiKey.trim()}`;
 
