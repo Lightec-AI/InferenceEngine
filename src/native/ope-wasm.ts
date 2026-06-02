@@ -82,8 +82,8 @@ export async function loadOpeWasm(): Promise<WasmOpeClientFfi | null> {
   if (initPromise) return initPromise;
   initPromise = (async () => {
     try {
-      // @ts-expect-error optional WASM bundle (see `pnpm build:ope-wasm`)
-      const mod = (await import("../../pkg/ope-wasm/ope_wasm.js")) as OpeWasmModule;
+      /** Resolved via `ope-wasm` package (`file:./pkg/ope-wasm`) — see `pnpm build:ope-wasm`. */
+      const mod = (await import("ope-wasm")) as OpeWasmModule;
       await mod.default();
       return wrapModule(mod);
     } catch {

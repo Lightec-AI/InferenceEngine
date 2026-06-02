@@ -332,7 +332,7 @@ sequenceDiagram
 | Attested connect + pool client | **Implemented** | `src/engine-plane/pool-client.ts`, TeeChat `attested-tls/` |
 | Gateway trust / chat | **Implemented** | TeeChat `server/confidential-ai/` |
 | Production TDX/SEV/GPU quote **backend** | **Planned** | wire `ope-attest` via `registerProductionQuoteBackend` |
-| Browser/mobile WASM crypto binding | **Planned** | `ope-ffi` WASM build |
+| Browser/mobile WASM crypto binding | **Implemented** | `crates/ope-wasm` → `pkg/ope-wasm/`; TeaChat `@teechat/inference-engine/browser` |
 
 The native library is built with `pnpm build:ffi` (cargo `ope-ffi`) and loaded via `koffi`.
 

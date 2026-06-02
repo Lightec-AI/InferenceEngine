@@ -16,6 +16,18 @@
     "./testing": {
       "types": "./src/testing/index.ts",
       "import": "./src/testing/index.ts"
+    },
+    "./browser": {
+      "types": "./src/browser.ts",
+      "import": "./src/browser.ts"
+    },
+    "./wasm-loader": {
+      "types": "./src/native/ope-wasm.ts",
+      "import": "./src/native/ope-wasm.ts"
+    },
+    "./ope-wasm": {
+      "import": "./pkg/ope-wasm/ope_wasm.js",
+      "default": "./pkg/ope-wasm/ope_wasm.js"
     }
   },
   "scripts": {
@@ -29,7 +41,8 @@
     "node": ">=20"
   },
   "dependencies": {
-    "koffi": "^2.16.2"
+    "koffi": "^2.16.2",
+    "ope-wasm": "file:./pkg/ope-wasm"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",

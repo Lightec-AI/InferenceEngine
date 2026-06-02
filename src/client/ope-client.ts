@@ -8,16 +8,21 @@
  * browser, or Capacitor.
  */
 
-import { randomUUID } from "node:crypto";
-
 import type { AttestationPolicy } from "../attestation.js";
 import { verifyEngineTrustBundle } from "../client-trust.js";
-import { resolveCryptoProvider, type CryptoProvider } from "../crypto/provider.js";
+import type { CryptoProvider } from "../crypto/provider.js";
 import type {
   EngineTrustBundle,
   OpeEnvelope,
   OpeEnvelopeMeta,
 } from "../protocol/types.js";
+
+function newEnvelopeNonce(): string {
+  if (typeof globalThis.crypto?.randomUUID === "function") {
+    return globalThis.crypto.randomUUID();
+  }
+  throw new Error("crypto.randomUUID is not available");
+}
 
 export interface VerifiedEngine {
   engineId: string;
@@ -43,7 +48,7 @@ export interface OpeClientOptions {
   gatewayBaseUrl: string;
   tlsClientCertSha256: string;
   attestationPolicy: AttestationPolicy;
-  provider?: CryptoProvider;
+  provider: CryptoProvider;
   fetchImpl?: typeof fetch;
   env?: NodeJS.ProcessEnv;
   /** Optional envelope signer (Ed25519 over canonical bytes); E2E works without it. */
@@ -55,7 +60,7 @@ export class OpeClient {
   private readonly fetchImpl: typeof fetch;
 
   constructor(private readonly opts: OpeClientOptions) {
-    this.provider = opts.provider ?? resolveCryptoProvider(opts.env);
+    this.provider = opts.provider;
     this.fetchImpl = opts.fetchImpl ?? fetch;
   }
 
@@ -105,7 +110,7 @@ export class OpeClient {
       kid: args.kid,
       recipient: args.recipient ?? "teechat-gateway",
       ts: new Date().toISOString(),
-      nonce: randomUUID(),
+      nonce: newEnvelopeNonce(),
       payload_hash: "",
       engine_id: engine.engineId,
       ...(args.meta ? { meta: args.meta } : {}),

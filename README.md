@@ -39,14 +39,17 @@ or `vendor/ope/target`. Build mode is controlled by `TEECHAT_BUILD`/`NODE_ENV`:
 - **development** — real when the library is available, else mock; override with
   `TEECHAT_CRYPTO=real|mock` and force real attestation with `TEECHAT_FORCE_REAL_CRYPTO=1`.
 
-> Note: `koffi` is a Node-native loader. Browser/mobile (Capacitor) clients need a WASM
-> build of `ope-ffi` (future work); the binding here serves the engine and Node clients.
+> **Node / engine:** `koffi` loads `ope-ffi` (`pnpm build:ffi`).  
+> **Browser / Capacitor:** use the `ope-wasm` crate (`pnpm build:wasm` or TeaChat `pnpm build:ope-wasm`).
+> TeaChat imports `@teechat/inference-engine/browser` and `@teechat/ope-wasm` — do not import the main
+> package barrel from Vite (it pulls Node-only modules).
 
 ## Scripts
 
 ```bash
 pnpm install
-pnpm build:ffi   # build the native hybrid-crypto library
+pnpm build:ffi   # native ope-ffi cdylib (engine + Node)
+pnpm build:wasm  # wasm-pack web bundle → pkg/ope-wasm/
 pnpm test
 pnpm typecheck
 ```
