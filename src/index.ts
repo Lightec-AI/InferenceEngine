@@ -1,6 +1,15 @@
 export * from "./protocol/types.js";
 export * from "./prefill.js";
 export * from "./attestation.js";
+export {
+  parseAttestationPolicyJson,
+  loadAttestationPolicyFromFile,
+  type AttestationPolicyFileJson,
+} from "./attestation-policy-file.js";
+export {
+  createFixtureProductionQuoteBackend,
+  FIXTURE_INTEL_TDX_QUOTE_PLACEHOLDER,
+} from "./attestation-fixture-backend.js";
 export * from "./ephemeral.js";
 export * from "./metering.js";
 export * from "./client-trust.js";
