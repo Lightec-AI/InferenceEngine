@@ -117,6 +117,11 @@ export function clearProductionQuoteBackend(): void {
   productionBackend = null;
 }
 
+/** Whether a production quote backend has been registered (SEC-001 canary / startup). */
+export function isProductionQuoteBackendRegistered(): boolean {
+  return productionBackend !== null;
+}
+
 /**
  * Production verifier: delegates to the registered backend and **fails closed** when
  * none is configured (no silent fallback to mock).
