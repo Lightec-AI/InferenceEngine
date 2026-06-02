@@ -7,6 +7,7 @@ export * from "./client-trust.js";
 export * from "./build-mode.js";
 export * from "./crypto/provider.js";
 export * from "./engine/epoch.js";
+export * from "./engine/supervisor.js";
 export * from "./client/ope-client.js";
 export * from "./client/gateway-mtls.js";
 export * from "./engine-plane/pool-client.js";
@@ -20,7 +21,6 @@ export {
   type OpeFfi,
   type EngineIdentityFull,
 } from "./native/ope-ffi.js";
-export { loadOpeWasm, __resetOpeWasmCacheForTests } from "./native/ope-wasm.js";
 export {
   createWasmClientCryptoProvider,
   type WasmOpeClientFfi,
