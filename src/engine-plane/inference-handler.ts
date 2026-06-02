@@ -5,6 +5,7 @@ import type { OpeEnvelope, SignedUsageReport } from "../protocol/types.js";
 import { CONTENT_TYPE_OPE_JSON } from "../protocol/types.js";
 import { vllmConfigFromEnv } from "../upstream/vllm-chat.js";
 import type { MockInferenceDecryptor } from "../server/mock-inference.js";
+import { opeInferenceRejectBody, validateOpeInferenceEnvelope } from "../server/ope-inference-gate.js";
 import { runOpeInferenceOnEnvelope, type OpeInferenceOptions } from "../server/ope-inference.js";
 
 export interface MockInferenceOptions {
@@ -26,10 +27,6 @@ interface DecryptedChatPayload {
 
 function tokensFromText(text: string): number {
   return Math.max(1, Math.ceil(text.length / 4));
-}
-
-function estimatePromptTokens(envelope: OpeEnvelope): number {
-  return Math.max(1, Math.ceil((envelope.ciphertext ?? "").length / 4));
 }
 
 function promptTokensFromPayload(payload: DecryptedChatPayload): number {
@@ -56,6 +53,15 @@ export async function runMockInferenceOnEnvelope(
   body: string;
   usageHeader?: string;
 }> {
+  const gate = validateOpeInferenceEnvelope(envelope);
+  if (!gate.ok) {
+    return {
+      status: gate.status,
+      contentType: "application/json",
+      body: opeInferenceRejectBody(gate.error, gate.detail),
+    };
+  }
+
   const vllmEnv = vllmConfigFromEnv();
   const vllm =
     options.vllm ??
@@ -80,23 +86,27 @@ export async function runMockInferenceOnEnvelope(
   const model = envelope.meta?.model ?? "unknown";
   const kvKey = conversationKvKey(convId, model);
 
+  if (!options.decryptor) {
+    return {
+      status: 503,
+      contentType: "application/json",
+      body: JSON.stringify({ error: "decryptor_required" }),
+    };
+  }
+
   let promptTokens: number;
-  if (options.decryptor && envelope.enc === "e2e-hybrid-pq") {
-    try {
-      const payload = options.decryptor.provider.decryptRequest(
-        options.decryptor.handle,
-        envelope,
-      ) as DecryptedChatPayload;
-      promptTokens = promptTokensFromPayload(payload);
-    } catch (e) {
-      return {
-        status: 400,
-        contentType: "application/json",
-        body: JSON.stringify({ error: "decrypt_failed", detail: String(e) }),
-      };
-    }
-  } else {
-    promptTokens = estimatePromptTokens(envelope);
+  try {
+    const payload = options.decryptor.provider.decryptRequest(
+      options.decryptor.handle,
+      envelope,
+    ) as DecryptedChatPayload;
+    promptTokens = promptTokensFromPayload(payload);
+  } catch (e) {
+    return {
+      status: 400,
+      contentType: "application/json",
+      body: JSON.stringify({ error: "decrypt_failed", detail: String(e) }),
+    };
   }
 
   const hash = prefixHash(envelope);

@@ -4,7 +4,12 @@ import { createHash } from "node:crypto";
 import type { CryptoProvider } from "../crypto/provider.js";
 import { conversationKvKey, planVllmPrefill } from "../prefill.js";
 import type { OpeEnvelope, SignedUsageReport } from "../protocol/types.js";
-import { HEADER_USAGE_REPORT, INFERENCE_PATH } from "../protocol/types.js";
+import { CONTENT_TYPE_OPE_JSON, HEADER_USAGE_REPORT, INFERENCE_PATH } from "../protocol/types.js";
+import {
+  opeInferenceRejectBody,
+  validateOpeInferenceContentType,
+  validateOpeInferenceEnvelope,
+} from "./ope-inference-gate.js";
 
 /** Real-decryption hook: the engine's live epoch handle + crypto provider. */
 export interface MockInferenceDecryptor {
@@ -18,11 +23,6 @@ interface DecryptedChatPayload {
 
 function tokensFromText(text: string): number {
   return Math.max(1, Math.ceil(text.length / 4));
-}
-
-function estimatePromptTokens(envelope: OpeEnvelope): number {
-  const raw = envelope.ciphertext ?? "";
-  return Math.max(1, Math.ceil(raw.length / 4));
 }
 
 /** Prompt tokens from the *decrypted* payload (real engine path). */
@@ -57,6 +57,13 @@ export function createMockInferenceServer(
       const chunks: Buffer[] = [];
       req.on("data", (c) => chunks.push(Buffer.isBuffer(c) ? c : Buffer.from(c)));
       req.on("end", () => {
+        const contentTypeGate = validateOpeInferenceContentType(req.headers["content-type"]);
+        if (!contentTypeGate.ok) {
+          res.statusCode = contentTypeGate.status;
+          res.end(opeInferenceRejectBody(contentTypeGate.error));
+          return;
+        }
+
         let envelope: OpeEnvelope;
         try {
           envelope = JSON.parse(Buffer.concat(chunks).toString("utf8")) as OpeEnvelope;
@@ -66,27 +73,34 @@ export function createMockInferenceServer(
           return;
         }
 
+        const envelopeGate = validateOpeInferenceEnvelope(envelope);
+        if (!envelopeGate.ok) {
+          res.statusCode = envelopeGate.status;
+          res.end(opeInferenceRejectBody(envelopeGate.error, envelopeGate.detail));
+          return;
+        }
+
+        if (!decryptor) {
+          res.statusCode = 503;
+          res.end(JSON.stringify({ error: "decryptor_required" }));
+          return;
+        }
+
         const convId = envelope.meta?.conversation_id ?? "conv-test";
         const model = envelope.meta?.model ?? "unknown";
         const kvKey = conversationKvKey(convId, model);
 
-        // Real engine path: decrypt the request to measure the actual prompt. The
-        // mock token-length estimate is only used when no decryptor is configured.
         let promptTokens: number;
-        if (decryptor && envelope.enc === "e2e-hybrid-pq") {
-          try {
-            const payload = decryptor.provider.decryptRequest(
-              decryptor.handle,
-              envelope,
-            ) as DecryptedChatPayload;
-            promptTokens = promptTokensFromPayload(payload);
-          } catch (e) {
-            res.statusCode = 400;
-            res.end(JSON.stringify({ error: "decrypt_failed", detail: String(e) }));
-            return;
-          }
-        } else {
-          promptTokens = estimatePromptTokens(envelope);
+        try {
+          const payload = decryptor.provider.decryptRequest(
+            decryptor.handle,
+            envelope,
+          ) as DecryptedChatPayload;
+          promptTokens = promptTokensFromPayload(payload);
+        } catch (e) {
+          res.statusCode = 400;
+          res.end(JSON.stringify({ error: "decrypt_failed", detail: String(e) }));
+          return;
         }
 
         const hash = prefixHash(envelope);

@@ -382,6 +382,7 @@ Implement in **inference engine binary**:
 
 ## 13. Review checklist
 
+- [x] Engine accepts **only** hybrid E2E OPE requests (`enc=e2e-hybrid-pq`, `application/ope+json`, `e2e.ephemeral_epoch` + engine hybrid keys, ciphertext + iv); rejects plaintext / `enc=none` / inline `payload`; requires decryptor before inference (`src/server/ope-inference-gate.ts`).
 - [ ] Agree ephemeral E2E vs static key in OPE spec (TeeChat profile addendum).
 - [ ] Confirm TLS client key is generated in TEE, not operator-issued PEM.
 - [ ] Define `ope-attest` quote layout for TDX + SEV + GPU vendors you ship.

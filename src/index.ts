@@ -38,6 +38,10 @@ export {
 } from "./server/mock-inference.js";
 export { runOpeInferenceOnEnvelope, resetOpeInferenceKvState } from "./server/ope-inference.js";
 export {
+  validateOpeInferenceEnvelope,
+  validateOpeInferenceContentType,
+} from "./server/ope-inference-gate.js";
+export {
   openAiChatCompletionsUrl,
   streamVllmChatCompletion,
   vllmConfigFromEnv,

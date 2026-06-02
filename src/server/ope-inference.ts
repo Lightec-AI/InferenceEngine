@@ -5,6 +5,7 @@ import type { OpeEnvelope, SignedUsageReport } from "../protocol/types.js";
 import { CONTENT_TYPE_OPE_JSON } from "../protocol/types.js";
 import { streamVllmChatCompletion, type VllmStreamOptions } from "../upstream/vllm-chat.js";
 import type { MockInferenceDecryptor } from "./mock-inference.js";
+import { opeInferenceRejectBody, validateOpeInferenceEnvelope } from "./ope-inference-gate.js";
 
 export interface OpeInferenceDecryptor extends MockInferenceDecryptor {}
 
@@ -60,6 +61,15 @@ export async function runOpeInferenceOnEnvelope(
   body: string;
   usageHeader?: string;
 }> {
+  const gate = validateOpeInferenceEnvelope(envelope);
+  if (!gate.ok) {
+    return {
+      status: gate.status,
+      contentType: "application/json",
+      body: opeInferenceRejectBody(gate.error, gate.detail),
+    };
+  }
+
   if (!options.decryptor) {
     return {
       status: 503,

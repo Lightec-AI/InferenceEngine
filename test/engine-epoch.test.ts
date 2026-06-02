@@ -7,7 +7,12 @@ import { createMockProvider, createRealProvider } from "../src/crypto/provider.j
 import { createEngineEpoch, disposeEngineEpoch } from "../src/engine/epoch.js";
 import { verifyEphemeralIdentitySignature } from "../src/ephemeral.js";
 import { createMockInferenceServer } from "../src/server/mock-inference.js";
-import { HEADER_USAGE_REPORT, INFERENCE_PATH, type SignedUsageReport } from "../src/protocol/types.js";
+import {
+  CONTENT_TYPE_OPE_JSON,
+  HEADER_USAGE_REPORT,
+  INFERENCE_PATH,
+  type SignedUsageReport,
+} from "../src/protocol/types.js";
 
 function ed25519Pair(): { pub: string; priv: KeyObject } {
   const { publicKey, privateKey } = generateKeyPairSync("ed25519");
@@ -103,10 +108,16 @@ describe("mock inference server with real decryption", () => {
       false,
     );
     (envelope as Record<string, unknown>).meta = { conversation_id: "conv-real", model: "llama3@teechat" };
+    (envelope as Record<string, unknown>).engine_id = "engine-decrypt";
+    const e2e = (envelope.e2e ?? {}) as Record<string, unknown>;
+    e2e.ephemeral_epoch = epoch.epochId;
+    e2e.engine_mlkem_encap = epoch.hybrid.mlkem_encapsulation_key;
+    e2e.engine_x25519 = epoch.hybrid.x25519_public;
+    (envelope as Record<string, unknown>).e2e = e2e;
 
     const res = await fetch(`${built.baseUrl}${INFERENCE_PATH}`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": CONTENT_TYPE_OPE_JSON },
       body: JSON.stringify(envelope),
     });
     expect(res.status).toBe(200);
@@ -133,7 +144,7 @@ describe("mock inference server with real decryption", () => {
 
     const res = await fetch(`${built.baseUrl}${INFERENCE_PATH}`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": CONTENT_TYPE_OPE_JSON },
       body: JSON.stringify({
         ope_version: "1.0",
         alg: "EdDSA",
@@ -143,12 +154,32 @@ describe("mock inference server with real decryption", () => {
         ts: new Date().toISOString(),
         nonce: "n",
         payload_hash: "",
+        engine_id: "engine-bad",
         ciphertext: "not-real",
         iv: "AAAAAAAAAAAAAAAA",
-        e2e: { kex: "X25519MLKEM768", client_x25519: "AA", mlkem_ciphertext: "AA" },
+        e2e: {
+          kex: "X25519MLKEM768",
+          engine_mlkem_encap: "encap",
+          engine_x25519: "x25519",
+          ephemeral_epoch: "epoch-1",
+        },
       }),
     });
     expect(res.status).toBe(400);
     disposeEngineEpoch(epoch);
+  });
+
+  it("rejects application/json without OPE content type", async () => {
+    const built = await createMockInferenceServer(undefined, {
+      decryptor: { handle: 1, provider: createMockProvider() },
+    });
+    server = built.server;
+    const res = await fetch(`${built.baseUrl}${INFERENCE_PATH}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: "{}",
+    });
+    expect(res.status).toBe(415);
+    expect(((await res.json()) as { error: string }).error).toBe("content_type_must_be_ope_json");
   });
 });
