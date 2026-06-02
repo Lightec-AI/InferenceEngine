@@ -11,6 +11,12 @@ export type { EngineTrustBundle, OpeEnvelope, OpeEnvelopeMeta } from "./protocol
 export {
   DEFAULT_BROWSER_TEST_ATTESTATION_POLICY,
   verifyEngineTrustBundleBrowser,
+  verifyEngineTrustBundleBrowserDetailed,
   type BrowserAttestationPolicy,
+  type BrowserTrustEvidence,
+  type BrowserTrustVerifyDetailedResult,
   type BrowserTrustVerifyResult,
+  type TrustSignatureSigner,
+  type TrustSignatureStatus,
+  type TrustSignatureVerification,
 } from "./browser-trust.js";

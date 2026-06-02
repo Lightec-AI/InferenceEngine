@@ -28,6 +28,33 @@ export interface BrowserTrustVerifyResult {
   reason?: string;
 }
 
+export type TrustSignatureSigner = "intel" | "nvidia" | "engine";
+
+export type TrustSignatureStatus = "verified" | "failed" | "mock_dev" | "pending_production";
+
+/** One row in client trust evidence (signature chain / identity binding). */
+export interface TrustSignatureVerification {
+  signer: TrustSignatureSigner;
+  status: TrustSignatureStatus;
+  /** Human-readable algorithm or chain description. */
+  algorithm: string;
+  detail?: string;
+}
+
+export interface BrowserTrustEvidence {
+  /** `mock_dev` until production TDX / NVIDIA verifiers are wired in the browser. */
+  mode: "mock_dev" | "production";
+  cpuKind: string;
+  gpuKind: string;
+  cpuPolicyId: string;
+  quoteIssuedAt?: string;
+  signatures: TrustSignatureVerification[];
+}
+
+export interface BrowserTrustVerifyDetailedResult extends BrowserTrustVerifyResult {
+  evidence?: BrowserTrustEvidence;
+}
+
 const MOCK_ATTEST_HMAC_SECRET = new TextEncoder().encode("teechat-mock-ope-attest-v1");
 
 function base64UrlToBytes(b64: string): Uint8Array {
@@ -37,12 +64,6 @@ function base64UrlToBytes(b64: string): Uint8Array {
   const out = new Uint8Array(binary.length);
   for (let i = 0; i < binary.length; i++) out[i] = binary.charCodeAt(i);
   return out;
-}
-
-function bytesToBase64Url(bytes: Uint8Array): string {
-  let binary = "";
-  for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]!);
-  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
 }
 
 interface QuoteClaims {
@@ -89,45 +110,125 @@ async function parseMockCpuQuote(quote: string): Promise<QuoteClaims | null> {
   }
 }
 
+const MOCK_GPU_EVIDENCE_UTF8 = "mock-gpu-tee-evidence";
+
+function verifyMockGpuEvidence(evidenceB64: string): boolean {
+  try {
+    const raw = base64UrlToBytes(evidenceB64);
+    return new TextDecoder().decode(raw) === MOCK_GPU_EVIDENCE_UTF8;
+  } catch {
+    return false;
+  }
+}
+
 async function verifyAttestationBundleBrowser(
   bundle: AttestationBundle,
   policy: BrowserAttestationPolicy,
   bind: { ed25519Public: string; tlsClientCertSha256: string },
   nowMs: number,
   skipTlsCertBinding: boolean,
-): Promise<BrowserTrustVerifyResult> {
+): Promise<BrowserTrustVerifyDetailedResult> {
+  const signatures: TrustSignatureVerification[] = [];
   const payload = await parseMockCpuQuote(bundle.cpu_tee.quote);
-  if (!payload) return { ok: false, reason: "invalid_cpu_quote" };
-  if (payload.v !== 1) return { ok: false, reason: "unsupported_quote_version" };
+  if (!payload) {
+    signatures.push({
+      signer: "intel",
+      status: "failed",
+      algorithm: "TDX quote (mock HMAC / production PCS chain)",
+      detail: "CPU quote signature could not be verified",
+    });
+    return { ok: false, reason: "invalid_cpu_quote", evidence: buildEvidence(bundle, signatures) };
+  }
+  signatures.push({
+    signer: "intel",
+    status: "mock_dev",
+    algorithm: "TDX quote — HMAC-SHA256 (dev mock)",
+    detail:
+      "Production verifies Intel-signed quote via PCS/PCK collateral (see Intel trust reference links in Settings).",
+  });
+  if (payload.v !== 1) {
+    return {
+      ok: false,
+      reason: "unsupported_quote_version",
+      evidence: buildEvidence(bundle, signatures, payload.issued_at),
+    };
+  }
   if (payload.ed25519_public !== bind.ed25519Public) {
-    return { ok: false, reason: "ed25519_mismatch" };
+    return { ok: false, reason: "ed25519_mismatch", evidence: buildEvidence(bundle, signatures, payload.issued_at) };
   }
   if (
     !skipTlsCertBinding &&
     payload.tls_client_cert_sha256.toLowerCase() !== bind.tlsClientCertSha256.toLowerCase()
   ) {
-    return { ok: false, reason: "tls_cert_mismatch" };
+    return { ok: false, reason: "tls_cert_mismatch", evidence: buildEvidence(bundle, signatures, payload.issued_at) };
   }
   const issued = Date.parse(payload.issued_at);
   if (Number.isNaN(issued) || nowMs - issued > policy.maxQuoteAgeMs) {
-    return { ok: false, reason: "quote_stale" };
+    return { ok: false, reason: "quote_stale", evidence: buildEvidence(bundle, signatures, payload.issued_at) };
   }
   if (!policy.allowedEngineBinarySha256.has(payload.engine.binary_sha256)) {
-    return { ok: false, reason: "engine_hash_not_allowed" };
+    return {
+      ok: false,
+      reason: "engine_hash_not_allowed",
+      evidence: buildEvidence(bundle, signatures, payload.issued_at),
+    };
   }
   if (!policy.allowedVllmBinarySha256.has(payload.vllm.binary_sha256)) {
-    return { ok: false, reason: "vllm_hash_not_allowed" };
+    return {
+      ok: false,
+      reason: "vllm_hash_not_allowed",
+      evidence: buildEvidence(bundle, signatures, payload.issued_at),
+    };
   }
   if (bundle.engine.binary_sha256 !== payload.engine.binary_sha256) {
-    return { ok: false, reason: "engine_hash_bundle_mismatch" };
+    return {
+      ok: false,
+      reason: "engine_hash_bundle_mismatch",
+      evidence: buildEvidence(bundle, signatures, payload.issued_at),
+    };
   }
   if (bundle.vllm.binary_sha256 !== payload.vllm.binary_sha256) {
-    return { ok: false, reason: "vllm_hash_bundle_mismatch" };
+    return {
+      ok: false,
+      reason: "vllm_hash_bundle_mismatch",
+      evidence: buildEvidence(bundle, signatures, payload.issued_at),
+    };
   }
+
+  const gpuOk = verifyMockGpuEvidence(bundle.gpu_tee.evidence);
+  signatures.push({
+    signer: "nvidia",
+    status: gpuOk ? "mock_dev" : "failed",
+    algorithm: gpuOk
+      ? "GPU confidential — mock evidence (dev)"
+      : "GPU confidential — evidence signature",
+    detail: gpuOk
+      ? "Production verifies NVIDIA RIM / attestation report chain (see NVIDIA trust reference links in Settings)."
+      : "GPU attestation evidence failed verification",
+  });
+  if (!gpuOk) {
+    return { ok: false, reason: "invalid_gpu_evidence", evidence: buildEvidence(bundle, signatures, payload.issued_at) };
+  }
+
   if (bundle.cpu_tee.verdict !== "pass" || bundle.gpu_tee.verdict !== "pass") {
-    return { ok: false, reason: "verdict_not_pass" };
+    return { ok: false, reason: "verdict_not_pass", evidence: buildEvidence(bundle, signatures, payload.issued_at) };
   }
-  return { ok: true };
+  return { ok: true, evidence: buildEvidence(bundle, signatures, payload.issued_at) };
+}
+
+function buildEvidence(
+  bundle: AttestationBundle,
+  signatures: TrustSignatureVerification[],
+  quoteIssuedAt?: string,
+): BrowserTrustEvidence {
+  return {
+    mode: "mock_dev",
+    cpuKind: bundle.cpu_tee.kind,
+    gpuKind: bundle.gpu_tee.kind,
+    cpuPolicyId: bundle.cpu_tee.policy_id,
+    quoteIssuedAt,
+    signatures: [...signatures],
+  };
 }
 
 function ephemeralSigningBytes(args: {
@@ -193,7 +294,18 @@ export async function verifyEngineTrustBundleBrowser(
   tlsClientCertSha256: string,
   nowMs = Date.now(),
   opts: VerifyEngineTrustBundleBrowserOptions = {},
-): Promise<BrowserTrustVerifyResult> {
+): Promise<BrowserTrustVerifyDetailedResult> {
+  return verifyEngineTrustBundleBrowserDetailed(bundle, policy, tlsClientCertSha256, nowMs, opts);
+}
+
+/** Verify trust bundle and return per-signer evidence for client UI (C-7). */
+export async function verifyEngineTrustBundleBrowserDetailed(
+  bundle: EngineTrustBundle,
+  policy: BrowserAttestationPolicy,
+  tlsClientCertSha256: string,
+  nowMs = Date.now(),
+  opts: VerifyEngineTrustBundleBrowserOptions = {},
+): Promise<BrowserTrustVerifyDetailedResult> {
   const attest = await verifyAttestationBundleBrowser(
     bundle.attestation,
     policy,
@@ -204,19 +316,33 @@ export async function verifyEngineTrustBundleBrowser(
     nowMs,
     opts.skipTlsCertBinding ?? false,
   );
-  if (!attest.ok) return attest;
+  const evidence =
+    attest.evidence ?? buildEvidence(bundle.attestation, []);
+
+  if (!attest.ok) return { ok: false, reason: attest.reason, evidence };
 
   if (!isEpochActive(bundle.not_before, bundle.not_after, nowMs)) {
-    return { ok: false, reason: "epoch_expired" };
+    return { ok: false, reason: "epoch_expired", evidence };
   }
 
   const sigOk = await verifyEphemeralIdentitySignatureBrowser(
     bundle.identity.ed25519_public,
     bundle,
   );
-  if (!sigOk) return { ok: false, reason: "invalid_identity_signature" };
+  const engineSig: TrustSignatureVerification = {
+    signer: "engine",
+    status: sigOk ? "verified" : "failed",
+    algorithm: "Ed25519 — OPE-ENGINE-EPHEMERAL-v1",
+    detail: sigOk
+      ? "Ephemeral epoch keys signed by engine identity public key"
+      : "Ephemeral identity signature invalid",
+  };
+  const signatures = [...evidence.signatures, engineSig];
+  const fullEvidence: BrowserTrustEvidence = { ...evidence, signatures };
 
-  return { ok: true };
+  if (!sigOk) return { ok: false, reason: "invalid_identity_signature", evidence: fullEvidence };
+
+  return { ok: true, evidence: fullEvidence };
 }
 
 export type { EngineTrustBundle };

@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   DEFAULT_BROWSER_TEST_ATTESTATION_POLICY,
-  verifyEngineTrustBundleBrowser,
+  verifyEngineTrustBundleBrowserDetailed,
 } from "../src/browser-trust.js";
 import { generateMockEngineKeys, generateMockEphemeralEpoch } from "../src/testing/mock-keys.js";
 
@@ -28,7 +28,7 @@ describe("verifyEngineTrustBundleBrowser", () => {
       gateway_cached_at: new Date().toISOString(),
     };
 
-    const r = await verifyEngineTrustBundleBrowser(
+    const r = await verifyEngineTrustBundleBrowserDetailed(
       bundle,
       DEFAULT_BROWSER_TEST_ATTESTATION_POLICY,
       material.tlsClientCertSha256,
@@ -36,5 +36,10 @@ describe("verifyEngineTrustBundleBrowser", () => {
       { skipTlsCertBinding: true },
     );
     expect(r.ok).toBe(true);
+    expect(r.evidence?.signatures.some((s) => s.signer === "intel")).toBe(true);
+    expect(r.evidence?.signatures.some((s) => s.signer === "nvidia")).toBe(true);
+    expect(r.evidence?.signatures.some((s) => s.signer === "engine" && s.status === "verified")).toBe(
+      true,
+    );
   });
 });
