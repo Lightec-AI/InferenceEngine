@@ -19,6 +19,8 @@ export interface MockInferenceOptions {
   delayMs?: number;
   /** When set (or `VLLM_BASE_URL` env), use real vLLM upstream instead of mock JSON body. */
   vllm?: OpeInferenceOptions["vllm"];
+  /** When false, ignore `VLLM_BASE_URL` / `TEECHAT_VLLM_BASE_URL` (used by gateway unit tests). */
+  useEnvVllm?: boolean;
 }
 
 interface DecryptedChatPayload {
@@ -62,7 +64,7 @@ export async function runMockInferenceOnEnvelope(
     };
   }
 
-  const vllmEnv = vllmConfigFromEnv();
+  const vllmEnv = options.useEnvVllm === false ? undefined : vllmConfigFromEnv();
   const vllm =
     options.vllm ??
     (vllmEnv

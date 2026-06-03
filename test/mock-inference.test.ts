@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 
 import { resetMockInferenceKvState, runMockInferenceOnEnvelope } from "../src/engine-plane/inference-handler.js";
 import type { OpeEnvelope } from "../src/protocol/types.js";
@@ -41,8 +41,13 @@ const mockDecryptor = {
 };
 
 describe("mock inference engine prefill", () => {
-  it("reports smaller engine_prefill_tokens on second turn with same prefix hash", async () => {
+  beforeEach(() => {
+    delete process.env.VLLM_BASE_URL;
+    delete process.env.TEECHAT_VLLM_BASE_URL;
     resetMockInferenceKvState();
+  });
+
+  it("reports smaller engine_prefill_tokens on second turn with same prefix hash", async () => {
 
     const base = validEnvelope();
 
