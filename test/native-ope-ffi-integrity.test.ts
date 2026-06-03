@@ -24,6 +24,24 @@ describe("ope-ffi native loader hardening (SEC-026)", () => {
     expect(() => loadOpeFfi({ ...PROD } as NodeJS.ProcessEnv)).toThrow(/TEECHAT_OPE_FFI_LIB/i);
   });
 
+  it("staging canary: does not require sha pin when an absolute library path exists", () => {
+    __resetOpeFfiCacheForTests();
+    const lib = tmpLib();
+    let err: unknown;
+    try {
+      loadOpeFfi({
+        ...PROD,
+        TEECHAT_ENV: "staging",
+        TEECHAT_OPE_FFI_LIB: lib,
+      } as NodeJS.ProcessEnv);
+    } catch (e) {
+      err = e;
+    }
+    expect(err).toBeDefined();
+    expect(String(err)).not.toMatch(/TEECHAT_OPE_FFI_SHA256/i);
+    expect(String(err)).not.toMatch(/TEECHAT_OPE_FFI_LIB to point/i);
+  });
+
   it("production: refuses a relative TEECHAT_OPE_FFI_LIB", () => {
     __resetOpeFfiCacheForTests();
     expect(() =>

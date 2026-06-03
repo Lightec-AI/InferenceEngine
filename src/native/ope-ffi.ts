@@ -16,7 +16,7 @@ import { createRequire } from "node:module";
 import { dirname, isAbsolute, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { isProduction } from "../build-mode.js";
+import { requiresVettedFfiLibrary } from "../build-mode.js";
 
 const require = createRequire(import.meta.url);
 const here = dirname(fileURLToPath(import.meta.url));
@@ -140,7 +140,7 @@ function productionLibraryPath(env: NodeJS.ProcessEnv): string {
 function verifyLibraryIntegrity(libPath: string, env: NodeJS.ProcessEnv): void {
   const expected = env.TEECHAT_OPE_FFI_SHA256?.trim().toLowerCase();
   if (!expected) {
-    if (isProduction(env)) {
+    if (requiresVettedFfiLibrary(env)) {
       throw new OpeFfiError(
         "production builds require TEECHAT_OPE_FFI_SHA256 to pin the native library hash",
       );
@@ -159,12 +159,14 @@ function verifyLibraryIntegrity(libPath: string, env: NodeJS.ProcessEnv): void {
 }
 
 function resolveLibraryPath(env: NodeJS.ProcessEnv): string | null {
-  if (isProduction(env)) {
+  if (requiresVettedFfiLibrary(env)) {
     // Throws (fail closed) rather than silently falling back to an untrusted artifact.
     return productionLibraryPath(env);
   }
   for (const p of candidateLibraryPaths(env)) {
-    if (existsSync(p)) return p;
+    if (!existsSync(p)) continue;
+    verifyLibraryIntegrity(p, env);
+    return p;
   }
   return null;
 }

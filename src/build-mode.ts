@@ -28,6 +28,17 @@ export function isProduction(env: NodeJS.ProcessEnv = process.env): boolean {
   return resolveBuildMode(env) === "production";
 }
 
+/** Pre-TDX / Mac Studio staging: production gateway profile with fixture attestation. */
+export function isStagingCanary(env: NodeJS.ProcessEnv = process.env): boolean {
+  if ((env.TEECHAT_ENV ?? "").trim().toLowerCase() === "staging") return true;
+  return (env.TEECHAT_ATTESTATION_BACKEND ?? "").trim().toLowerCase() === "fixture";
+}
+
+/** SEC-026: real production deploys must pin an absolute, hashed library path. */
+export function requiresVettedFfiLibrary(env: NodeJS.ProcessEnv = process.env): boolean {
+  return isProduction(env) && !isStagingCanary(env);
+}
+
 /**
  * Whether mock key material / mock attestation may be used.
  *
