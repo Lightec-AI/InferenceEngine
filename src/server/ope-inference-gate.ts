@@ -24,7 +24,7 @@ function parseE2e(envelope: OpeEnvelope): OpeE2eDescriptor | null {
 }
 
 function hasForbiddenPlaintext(envelope: OpeEnvelope): boolean {
-  const rec = envelope as Record<string, unknown>;
+  const rec = envelope as unknown as Record<string, unknown>;
   if ("payload" in rec && rec.payload !== undefined && rec.payload !== null) {
     return true;
   }
