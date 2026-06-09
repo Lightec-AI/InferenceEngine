@@ -28,7 +28,43 @@ export interface BrowserTrustVerifyResult {
   reason?: string;
 }
 
-export type TrustSignatureSigner = "intel" | "nvidia" | "engine";
+export type TrustSignatureSigner = "intel" | "amd" | "nvidia" | "engine";
+
+type CpuTeeKind = "tdx" | "sev-snp";
+
+function cpuSignerForKind(kind: CpuTeeKind): "intel" | "amd" {
+  return kind === "sev-snp" ? "amd" : "intel";
+}
+
+function cpuSignatureAlgorithm(kind: CpuTeeKind, mock: boolean): string {
+  if (kind === "sev-snp") {
+    return mock
+      ? "SEV-SNP report — HMAC-SHA256 (dev mock)"
+      : "SEV-SNP report — AMD ARK/ASK/VCEK chain (production)";
+  }
+  return mock ? "TDX quote — HMAC-SHA256 (dev mock)" : "TDX quote — Intel PCS/PCK chain (production)";
+}
+
+function cpuSignatureDetail(kind: CpuTeeKind, failed: boolean): string {
+  if (failed) return "CPU quote signature could not be verified";
+  if (kind === "sev-snp") {
+    return "Production verifies AMD-signed SEV-SNP report via KDS ARK/ASK/VCEK collateral (see AMD trust reference links in Settings).";
+  }
+  return "Production verifies Intel-signed quote via PCS/PCK collateral (see Intel trust reference links in Settings).";
+}
+
+function pushCpuQuoteSignature(
+  signatures: TrustSignatureVerification[],
+  kind: CpuTeeKind,
+  status: TrustSignatureStatus,
+): void {
+  signatures.push({
+    signer: cpuSignerForKind(kind),
+    status,
+    algorithm: cpuSignatureAlgorithm(kind, status === "mock_dev"),
+    detail: cpuSignatureDetail(kind, status === "failed"),
+  });
+}
 
 export type TrustSignatureStatus = "verified" | "failed" | "mock_dev" | "pending_production";
 
@@ -129,23 +165,14 @@ async function verifyAttestationBundleBrowser(
   skipTlsCertBinding: boolean,
 ): Promise<BrowserTrustVerifyDetailedResult> {
   const signatures: TrustSignatureVerification[] = [];
+  const cpuKind = bundle.cpu_tee.kind as CpuTeeKind;
   const payload = await parseMockCpuQuote(bundle.cpu_tee.quote);
   if (!payload) {
-    signatures.push({
-      signer: "intel",
-      status: "failed",
-      algorithm: "TDX quote (mock HMAC / production PCS chain)",
-      detail: "CPU quote signature could not be verified",
-    });
+    pushCpuQuoteSignature(signatures, cpuKind, "failed");
     return { ok: false, reason: "invalid_cpu_quote", evidence: buildEvidence(bundle, signatures) };
   }
-  signatures.push({
-    signer: "intel",
-    status: "mock_dev",
-    algorithm: "TDX quote — HMAC-SHA256 (dev mock)",
-    detail:
-      "Production verifies Intel-signed quote via PCS/PCK collateral (see Intel trust reference links in Settings).",
-  });
+  const quoteKind = payload.kind as CpuTeeKind;
+  pushCpuQuoteSignature(signatures, quoteKind, "mock_dev");
   if (payload.v !== 1) {
     return {
       ok: false,
