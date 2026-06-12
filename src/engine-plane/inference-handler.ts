@@ -9,6 +9,7 @@ import { opeInferenceRejectBody, validateOpeInferenceEnvelope } from "../server/
 import { runOpeInferenceOnEnvelope, type OpeInferenceOptions } from "../server/ope-inference.js";
 
 export interface MockInferenceOptions {
+  requestId?: string;
   decryptor?: MockInferenceDecryptor;
   onInference?: (
     envelope: OpeEnvelope,
@@ -76,6 +77,7 @@ export async function runMockInferenceOnEnvelope(
 
   if (vllm?.baseUrl && options.decryptor) {
     return runOpeInferenceOnEnvelope(envelope, {
+      requestId: options.requestId,
       decryptor: options.decryptor,
       vllm,
       onUsage: options.onInference

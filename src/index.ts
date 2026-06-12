@@ -21,6 +21,14 @@ export * from "./engine/supervisor.js";
 export * from "./client/ope-client.js";
 export * from "./client/gateway-mtls.js";
 export * from "./engine-plane/pool-client.js";
+export { configureEventLogFromEnv, setEventLogLevel, setEventLogSink } from "./ops/event-log.js";
+export {
+  logEngineEphemeralRegisterFailed,
+  logEnginePoolConnect,
+  logEngineShutdown,
+  logEngineVllmUpstreamError,
+  logEngineWorkAssigned,
+} from "./ops/engine-events.js";
 export { resetMockInferenceKvState } from "./engine-plane/inference-handler.js";
 export type { MockInferenceOptions } from "./engine-plane/inference-handler.js";
 export {

@@ -21,6 +21,12 @@ import {
   type AttestationPolicy,
   type PlatformAttestationPolicy,
 } from "../attestation.js";
+import {
+  logEnginePoolConnect,
+  logEnginePoolConnectFailed,
+  logEngineWorkAssigned,
+} from "../ops/engine-events.js";
+import { configureEventLogFromEnv } from "../ops/event-log.js";
 import { runMockInferenceOnEnvelope, type MockInferenceOptions } from "./inference-handler.js";
 
 export const ENGINE_PLANE_PATH_INFERENCE_RESULT = `${INFERENCE_PATH}/result`;
@@ -132,8 +138,15 @@ async function openPooledConnection(
   });
   if (connectRes.status !== 200) {
     session.close();
+    logEnginePoolConnectFailed(
+      connectBody.engine_id,
+      opts.gatewayBaseUrl,
+      `attested_connect_${connectRes.status}`,
+    );
     throw new Error(`attested connect failed: ${connectRes.status} ${JSON.stringify(connectRes.json)}`);
   }
+
+  logEnginePoolConnect(connectBody.engine_id, opts.gatewayBaseUrl, sessionId);
 
   const verify = opts.gatewayPlatformVerify;
   if (verify) {
@@ -206,12 +219,14 @@ function startPullWorker(
       }
 
       void (async () => {
+        const startedAt = Date.now();
         try {
           const envelope = JSON.parse(Buffer.concat(workChunks).toString("utf8")) as OpeEnvelope;
           const { status, contentType, body, usageHeader } = await runMockInferenceOnEnvelope(
             envelope,
-            inference,
+            { ...inference, requestId },
           );
+          logEngineWorkAssigned(requestId, Date.now() - startedAt);
 
           const resultStream = session.request({
             ":method": "POST",
@@ -252,6 +267,7 @@ function startPullWorker(
 export async function createEnginePlanePoolClient(
   opts: EnginePlanePoolClientOptions,
 ): Promise<EnginePlanePoolClient> {
+  configureEventLogFromEnv(process.env);
   const sessionIds: string[] = [];
   const sessions: ClientHttp2Session[] = [];
   const stopWorkers: Array<() => void> = [];
@@ -259,7 +275,17 @@ export async function createEnginePlanePoolClient(
 
   for (let i = 0; i < opts.poolTargetSize; i++) {
     const sessionId = randomUUID();
-    const session = await openPooledConnection(opts, sessionId);
+    let session: ClientHttp2Session;
+    try {
+      session = await openPooledConnection(opts, sessionId);
+    } catch (e) {
+      logEnginePoolConnectFailed(
+        opts.connect.engine_id,
+        opts.gatewayBaseUrl,
+        e instanceof Error ? e.message : String(e),
+      );
+      throw e;
+    }
     sessionIds.push(sessionId);
     sessions.push(session);
     stopWorkers.push(startPullWorker(session, sessionId, inference, opts.onError));

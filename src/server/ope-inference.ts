@@ -5,11 +5,19 @@ import type { OpeEnvelope, SignedUsageReport } from "../protocol/types.js";
 import { CONTENT_TYPE_OPE_JSON } from "../protocol/types.js";
 import { streamVllmChatCompletion, type VllmStreamOptions } from "../upstream/vllm-chat.js";
 import type { MockInferenceDecryptor } from "./mock-inference.js";
+import { logEngineVllmUpstreamError } from "../ops/engine-events.js";
 import { opeInferenceRejectBody, validateOpeInferenceEnvelope } from "./ope-inference-gate.js";
 
 export interface OpeInferenceDecryptor extends MockInferenceDecryptor {}
 
+function httpStatusFromVllmError(err: unknown): number | undefined {
+  const msg = err instanceof Error ? err.message : String(err);
+  const match = /vLLM HTTP (\d{3})/i.exec(msg);
+  return match ? Number(match[1]) : undefined;
+}
+
 export interface OpeInferenceOptions {
+  requestId?: string;
   decryptor?: OpeInferenceDecryptor;
   vllm?: Omit<VllmStreamOptions, "messages" | "model"> & { fetchImpl?: typeof fetch };
   onUsage?: (envelope: OpeEnvelope, prefillTokens: number, completionTokens: number) => SignedUsageReport;
@@ -140,6 +148,7 @@ export async function runOpeInferenceOnEnvelope(
     }
   } catch (e) {
     provider.freeResponse(session);
+    logEngineVllmUpstreamError(options.requestId, httpStatusFromVllmError(e), e);
     return {
       status: 502,
       contentType: "application/json",
