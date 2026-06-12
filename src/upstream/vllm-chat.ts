@@ -1,6 +1,26 @@
-export interface VllmChatMessage {
-  role: string;
-  content: string;
+import type { VllmChatMessage } from "./vllm-multimodal.js";
+
+export type { VllmChatMessage, VllmContentPart } from "./vllm-multimodal.js";
+export { estimatePromptTokensFromMessages, normalizeVllmMessages } from "./vllm-multimodal.js";
+
+export const VLLM_MAX_TOKENS_DEFAULT = 4096;
+export const VLLM_MAX_TOKENS_MIN = 256;
+export const VLLM_MAX_TOKENS_MAX = 32_768;
+
+export const VLLM_OUTPUT_TOKEN_LIMIT_NOTICE =
+  "\n\n*Generation stopped: the model hit its output token limit. Send a follow-up to continue.*";
+
+export function clampVllmMaxTokens(n: number): number {
+  return Math.min(VLLM_MAX_TOKENS_MAX, Math.max(VLLM_MAX_TOKENS_MIN, Math.floor(n)));
+}
+
+export function maxTokensFromEnv(env: NodeJS.ProcessEnv = process.env): number {
+  const raw =
+    env.TEECHAT_OPE_MAX_TOKENS?.trim() || env.TEECHAT_VLLM_MAX_TOKENS?.trim() || "";
+  if (!raw) return VLLM_MAX_TOKENS_DEFAULT;
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n <= 0) return VLLM_MAX_TOKENS_DEFAULT;
+  return clampVllmMaxTokens(n);
 }
 
 export interface VllmStreamOptions {
@@ -11,6 +31,8 @@ export interface VllmStreamOptions {
   maxTokens?: number;
   signal?: AbortSignal;
   fetchImpl?: typeof fetch;
+  /** When set, the upstream `finish_reason` is written here (e.g. `length`). */
+  finishState?: { reason?: string };
 }
 
 function normalizeBaseUrl(baseUrl: string): string {
@@ -41,7 +63,7 @@ export async function* streamVllmChatCompletion(
       model: opts.model,
       messages: opts.messages,
       stream: true,
-      max_tokens: opts.maxTokens ?? 1024,
+      max_tokens: opts.maxTokens ?? maxTokensFromEnv(),
     }),
   });
 
@@ -68,9 +90,14 @@ export async function* streamVllmChatCompletion(
       if (data === "[DONE]") return;
       try {
         const chunk = JSON.parse(data) as {
-          choices?: Array<{ delta?: { content?: string } }>;
+          choices?: Array<{ delta?: { content?: string }; finish_reason?: string | null }>;
         };
-        const delta = chunk.choices?.[0]?.delta?.content;
+        const choice = chunk.choices?.[0];
+        const finish = choice?.finish_reason;
+        if (finish && finish !== "null") {
+          if (opts.finishState) opts.finishState.reason = finish;
+        }
+        const delta = choice?.delta?.content;
         if (delta) yield delta;
       } catch {
         /* ignore malformed SSE lines */

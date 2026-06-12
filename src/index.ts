@@ -60,8 +60,11 @@ export {
   validateOpeInferenceContentType,
 } from "./server/ope-inference-gate.js";
 export {
+  clampVllmMaxTokens,
+  maxTokensFromEnv,
   openAiChatCompletionsUrl,
   streamVllmChatCompletion,
+  VLLM_MAX_TOKENS_DEFAULT,
   vllmConfigFromEnv,
 } from "./upstream/vllm-chat.js";
 export {

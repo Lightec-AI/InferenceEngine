@@ -2,8 +2,21 @@ import { createHash } from "node:crypto";
 
 import { conversationKvKey, planVllmPrefill } from "../prefill.js";
 import type { OpeEnvelope, SignedUsageReport } from "../protocol/types.js";
+import {
+  CONTENT_TYPE_OPE_JSON_STREAM,
+  encodeOpeStreamLine,
+} from "../protocol/ope-stream.js";
 import { CONTENT_TYPE_OPE_JSON } from "../protocol/types.js";
-import { streamVllmChatCompletion, type VllmStreamOptions } from "../upstream/vllm-chat.js";
+import {
+  clampVllmMaxTokens,
+  streamVllmChatCompletion,
+  VLLM_OUTPUT_TOKEN_LIMIT_NOTICE,
+  type VllmStreamOptions,
+} from "../upstream/vllm-chat.js";
+import {
+  estimatePromptTokensFromMessages,
+  normalizeVllmMessages,
+} from "../upstream/vllm-multimodal.js";
 import type { MockInferenceDecryptor } from "./mock-inference.js";
 import { logEngineVllmUpstreamError } from "../ops/engine-events.js";
 import { opeInferenceRejectBody, validateOpeInferenceEnvelope } from "./ope-inference-gate.js";
@@ -16,17 +29,25 @@ function httpStatusFromVllmError(err: unknown): number | undefined {
   return match ? Number(match[1]) : undefined;
 }
 
+export interface OpeNdjsonStreamWriter {
+  write(chunk: Buffer): void;
+  end(): void;
+}
+
 export interface OpeInferenceOptions {
   requestId?: string;
   decryptor?: OpeInferenceDecryptor;
   vllm?: Omit<VllmStreamOptions, "messages" | "model"> & { fetchImpl?: typeof fetch };
   onUsage?: (envelope: OpeEnvelope, prefillTokens: number, completionTokens: number) => SignedUsageReport;
   chunkChars?: number;
+  /** When set, emit OPE §7 NDJSON frames as ciphertext is produced (stream cipher). */
+  ndjsonStream?: OpeNdjsonStreamWriter;
 }
 
 interface DecryptedChatPayload {
   model?: string;
   messages?: Array<{ role?: string; content?: unknown }>;
+  max_tokens?: number;
 }
 
 function tokensFromText(text: string): number {
@@ -34,10 +55,8 @@ function tokensFromText(text: string): number {
 }
 
 function promptTokensFromPayload(payload: DecryptedChatPayload): number {
-  const text = (payload.messages ?? [])
-    .map((m) => (typeof m.content === "string" ? m.content : JSON.stringify(m.content ?? "")))
-    .join(" ");
-  return tokensFromText(text);
+  const messages = normalizeVllmMessages(payload.messages ?? []);
+  return estimatePromptTokensFromMessages(messages);
 }
 
 function prefixHash(envelope: OpeEnvelope): string {
@@ -115,10 +134,7 @@ export async function runOpeInferenceOnEnvelope(
   const { plan, nextState } = planVllmPrefill(kvByConversation.get(kvKey), promptTokens, hash);
   kvByConversation.set(kvKey, nextState);
 
-  const messages = (payload.messages ?? []).map((m) => ({
-    role: m.role ?? "user",
-    content: typeof m.content === "string" ? m.content : JSON.stringify(m.content ?? ""),
-  }));
+  const messages = normalizeVllmMessages(payload.messages ?? []);
 
   const provider = options.decryptor.provider;
   const { session, serverShare } = provider.beginResponse(options.decryptor.handle, envelope);
@@ -126,29 +142,62 @@ export async function runOpeInferenceOnEnvelope(
   const chunks: string[] = [];
   let pending = "";
   let fullText = "";
+  let seq = 0;
+  const finishState: { reason?: string } = {};
+  const payloadMaxTokens =
+    typeof payload.max_tokens === "number" && payload.max_tokens > 0
+      ? clampVllmMaxTokens(payload.max_tokens)
+      : undefined;
+  const streamOut = options.ndjsonStream;
+
+  const emitEncryptedPiece = (piece: string, final: boolean) => {
+    const ciphertext = provider.encryptResponseChunk(session, seq, Buffer.from(piece, "utf8"));
+    if (streamOut) {
+      streamOut.write(encodeOpeStreamLine({ ope_stream: "1.0", seq, ciphertext, final }));
+    } else {
+      chunks.push(ciphertext);
+    }
+    seq += 1;
+  };
+
+  if (streamOut) {
+    streamOut.write(encodeOpeStreamLine({ ope_stream: "1.0", server_share: serverShare }));
+  }
 
   try {
     for await (const delta of streamVllmChatCompletion({
       ...options.vllm,
       model,
       messages,
+      maxTokens: payloadMaxTokens ?? options.vllm?.maxTokens,
+      finishState,
     })) {
       fullText += delta;
       pending += delta;
       while (pending.length >= chunkChars) {
         const piece = pending.slice(0, chunkChars);
         pending = pending.slice(chunkChars);
-        chunks.push(provider.encryptResponseChunk(session, chunks.length, Buffer.from(piece, "utf8")));
+        emitEncryptedPiece(piece, false);
       }
     }
+    if (finishState.reason === "length" && !fullText.includes("output token limit")) {
+      fullText += VLLM_OUTPUT_TOKEN_LIMIT_NOTICE;
+      pending += VLLM_OUTPUT_TOKEN_LIMIT_NOTICE;
+    }
     if (pending.length > 0) {
-      chunks.push(
-        provider.encryptResponseChunk(session, chunks.length, Buffer.from(pending, "utf8")),
-      );
+      emitEncryptedPiece(pending, true);
     }
   } catch (e) {
     provider.freeResponse(session);
     logEngineVllmUpstreamError(options.requestId, httpStatusFromVllmError(e), e);
+    if (streamOut) {
+      streamOut.end();
+      return {
+        status: 502,
+        contentType: CONTENT_TYPE_OPE_JSON_STREAM,
+        body: "",
+      };
+    }
     return {
       status: 502,
       contentType: "application/json",
@@ -174,6 +223,20 @@ export async function runOpeInferenceOnEnvelope(
     } as SignedUsageReport);
 
   const usageHeader = Buffer.from(JSON.stringify(signed)).toString("base64url");
+
+  if (streamOut) {
+    streamOut.write(
+      encodeOpeStreamLine({ ope_stream: "1.0", type: "trailer", usage_report: usageHeader }),
+    );
+    streamOut.end();
+    return {
+      status: 200,
+      contentType: CONTENT_TYPE_OPE_JSON_STREAM,
+      body: "",
+      usageHeader,
+    };
+  }
+
   const body = JSON.stringify({
     server_share: serverShare,
     chunks,

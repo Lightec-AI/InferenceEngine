@@ -222,26 +222,55 @@ function startPullWorker(
         const startedAt = Date.now();
         try {
           const envelope = JSON.parse(Buffer.concat(workChunks).toString("utf8")) as OpeEnvelope;
-          const { status, contentType, body, usageHeader } = await runMockInferenceOnEnvelope(
-            envelope,
-            { ...inference, requestId },
-          );
+          let resultStream: import("node:http2").ClientHttp2Stream | undefined;
+
+          const { status, contentType, body } = await runMockInferenceOnEnvelope(envelope, {
+            ...inference,
+            requestId,
+            ndjsonStream: {
+              write(chunk) {
+                if (!resultStream) {
+                  resultStream = session.request({
+                    ":method": "POST",
+                    ":path": ENGINE_PLANE_PATH_INFERENCE_RESULT,
+                    [HEADER_OPE_SESSION_ID]: sessionId,
+                    [HEADER_OPE_REQUEST_ID]: requestId,
+                    "content-type": "application/ope+json-stream",
+                    "x-ope-status": "200",
+                  });
+                }
+                resultStream.write(chunk);
+              },
+              end() {
+                resultStream?.end();
+              },
+            },
+          });
           logEngineWorkAssigned(requestId, Date.now() - startedAt);
 
-          const resultStream = session.request({
-            ":method": "POST",
-            ":path": ENGINE_PLANE_PATH_INFERENCE_RESULT,
-            [HEADER_OPE_SESSION_ID]: sessionId,
-            [HEADER_OPE_REQUEST_ID]: requestId,
-            "content-type": contentType,
-            "x-ope-status": String(status),
-            ...(usageHeader ? { [HEADER_USAGE_REPORT]: usageHeader } : {}),
-          });
+          if (contentType !== "application/ope+json-stream") {
+            resultStream = session.request({
+              ":method": "POST",
+              ":path": ENGINE_PLANE_PATH_INFERENCE_RESULT,
+              [HEADER_OPE_SESSION_ID]: sessionId,
+              [HEADER_OPE_REQUEST_ID]: requestId,
+              "content-type": contentType,
+              "x-ope-status": String(status),
+            });
+            resultStream.end(body);
+          }
 
-          resultStream.end(body);
+          if (!resultStream) {
+            throw new Error("inference produced no response stream");
+          }
+
           await new Promise<void>((resolve, reject) => {
-            resultStream.on("end", () => resolve());
-            resultStream.on("error", reject);
+            if (resultStream!.writableEnded) {
+              resolve();
+              return;
+            }
+            resultStream!.on("end", () => resolve());
+            resultStream!.on("error", reject);
           });
         } catch (e) {
           onError?.(e instanceof Error ? e : new Error(String(e)));

@@ -13,6 +13,10 @@
       "types": "./src/protocol/types.ts",
       "import": "./src/protocol/types.ts"
     },
+    "./protocol/ope-stream": {
+      "types": "./src/protocol/ope-stream.ts",
+      "import": "./src/protocol/ope-stream.ts"
+    },
     "./testing": {
       "types": "./src/testing/index.ts",
       "import": "./src/testing/index.ts"
