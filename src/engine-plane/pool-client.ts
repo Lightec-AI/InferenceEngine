@@ -224,7 +224,7 @@ function startPullWorker(
           const envelope = JSON.parse(Buffer.concat(workChunks).toString("utf8")) as OpeEnvelope;
           let resultStream: import("node:http2").ClientHttp2Stream | undefined;
 
-          const { status, contentType, body } = await runMockInferenceOnEnvelope(envelope, {
+          const { status, contentType, body, usageHeader } = await runMockInferenceOnEnvelope(envelope, {
             ...inference,
             requestId,
             ndjsonStream: {
@@ -256,8 +256,16 @@ function startPullWorker(
               [HEADER_OPE_REQUEST_ID]: requestId,
               "content-type": contentType,
               "x-ope-status": String(status),
+              ...(usageHeader ? { [HEADER_USAGE_REPORT]: usageHeader } : {}),
             });
             resultStream.end(body);
+          } else if (usageHeader && resultStream) {
+            // vLLM/Ollama stream: usage is also in the NDJSON trailer; header helps non-streaming gateways.
+            try {
+              resultStream.addTrailers({ [HEADER_USAGE_REPORT]: usageHeader });
+            } catch {
+              /* trailers unsupported — trailer frame in body is authoritative */
+            }
           }
 
           if (!resultStream) {
