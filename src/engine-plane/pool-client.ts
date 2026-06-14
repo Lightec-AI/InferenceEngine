@@ -227,24 +227,6 @@ function startPullWorker(
           const { status, contentType, body, usageHeader } = await runMockInferenceOnEnvelope(envelope, {
             ...inference,
             requestId,
-            ndjsonStream: {
-              write(chunk) {
-                if (!resultStream) {
-                  resultStream = session.request({
-                    ":method": "POST",
-                    ":path": ENGINE_PLANE_PATH_INFERENCE_RESULT,
-                    [HEADER_OPE_SESSION_ID]: sessionId,
-                    [HEADER_OPE_REQUEST_ID]: requestId,
-                    "content-type": "application/ope+json-stream",
-                    "x-ope-status": "200",
-                  });
-                }
-                resultStream.write(chunk);
-              },
-              end() {
-                resultStream?.end();
-              },
-            },
           });
           logEngineWorkAssigned(requestId, Date.now() - startedAt);
 
@@ -260,9 +242,11 @@ function startPullWorker(
             });
             resultStream.end(body);
           } else if (usageHeader && resultStream) {
-            // vLLM/Ollama stream: usage is also in the NDJSON trailer; header helps non-streaming gateways.
             try {
-              resultStream.addTrailers({ [HEADER_USAGE_REPORT]: usageHeader });
+              const streamWithTrailers = resultStream as import("node:http2").ClientHttp2Stream & {
+                addTrailers?: (trailers: Record<string, string>) => void;
+              };
+              streamWithTrailers.addTrailers?.({ [HEADER_USAGE_REPORT]: usageHeader });
             } catch {
               /* trailers unsupported — trailer frame in body is authoritative */
             }
