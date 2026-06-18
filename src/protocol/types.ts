@@ -130,6 +130,7 @@ export const INFERENCE_PATH = "/v1/ope/inference";
 
 /** Attested engine plane (HTTP/2 on TLS). */
 export const ENGINE_PLANE_PATH_CONNECT = "/v1/ope/control/connect";
+export const ENGINE_PLANE_PATH_DISCONNECT = "/v1/ope/control/disconnect";
 export const ENGINE_PLANE_PATH_EPHEMERAL = "/v1/ope/control/ephemeral";
 export const ENGINE_PLANE_PATH_POOL = "/v1/ope/control/pool";
 export const ENGINE_PLANE_PATH_WORK_PULL = "/v1/ope/work/pull";
@@ -152,6 +153,23 @@ export interface AttestedConnectResponse {
 
 export interface AttestedPoolResizeRequest {
   pool_target_size: number;
+}
+
+/** Graceful engine session logout before closing the Attested TLS connection. */
+export interface AttestedDisconnectRequest {
+  engine_id: string;
+  session_id: string;
+  reason?: "shutdown" | "upgrade" | "admin";
+}
+
+export interface AttestedDisconnectResponse {
+  ok: boolean;
+  draining: boolean;
+  in_flight: number;
+  /** Engine may close the HTTP/2 session when true. */
+  ready_to_close: boolean;
+  /** Set when this was the last live session and the engine row was removed. */
+  engine_deregistered?: boolean;
 }
 
 export const MOCK_MLKEM_ENCAP_B64URL_LEN = 1184;

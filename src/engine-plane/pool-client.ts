@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 
 import {
   ENGINE_PLANE_PATH_CONNECT,
+  ENGINE_PLANE_PATH_DISCONNECT,
   ENGINE_PLANE_PATH_EPHEMERAL,
   ENGINE_PLANE_PATH_POOL,
   ENGINE_PLANE_PATH_WORK_PULL,
@@ -11,6 +12,8 @@ import {
   HEADER_USAGE_REPORT,
   INFERENCE_PATH,
   type AttestedConnectRequest,
+  type AttestedDisconnectRequest,
+  type AttestedDisconnectResponse,
   type AttestedPoolResizeRequest,
   type EngineEphemeralRegisterRequest,
   type OpeEnvelope,
@@ -176,6 +179,33 @@ async function openPooledConnection(
   return session;
 }
 
+const DEFAULT_DISCONNECT_TIMEOUT_MS = 120_000;
+const DEFAULT_DISCONNECT_POLL_MS = 250;
+
+async function gracefulDisconnectSession(
+  session: ClientHttp2Session,
+  sessionId: string,
+  engineId: string,
+  reason: AttestedDisconnectRequest["reason"] = "shutdown",
+  timeoutMs = DEFAULT_DISCONNECT_TIMEOUT_MS,
+): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (session.closed || session.destroyed) return;
+    const res = await h2RequestJson(session, {
+      method: "POST",
+      path: ENGINE_PLANE_PATH_DISCONNECT,
+      body: { engine_id: engineId, session_id: sessionId, reason } satisfies AttestedDisconnectRequest,
+      headers: { [HEADER_OPE_SESSION_ID]: sessionId },
+    }).catch(() => ({ status: 0, json: {} }));
+    if (res.status === 200) {
+      const body = res.json as AttestedDisconnectResponse;
+      if (body.ready_to_close) return;
+    }
+    await new Promise((r) => setTimeout(r, DEFAULT_DISCONNECT_POLL_MS));
+  }
+}
+
 function startPullWorker(
   session: ClientHttp2Session,
   sessionId: string,
@@ -315,10 +345,16 @@ export async function createEnginePlanePoolClient(
   return {
     sessionIds,
     sessions,
-    close: async () => {
+    close: async (reason: AttestedDisconnectRequest["reason"] = "shutdown") => {
       for (const stop of stopWorkers) stop();
+      const engineId = opts.connect.engine_id;
+      await Promise.all(
+        sessions.map((session, i) =>
+          gracefulDisconnectSession(session, sessionIds[i]!, engineId, reason).catch(() => undefined),
+        ),
+      );
       for (const s of sessions) {
-        if (!s.destroyed) s.destroy();
+        if (!s.destroyed) s.close();
       }
     },
     setPoolTargetSize: async (size: number) => {
@@ -341,19 +377,29 @@ export async function createEnginePlanePoolClient(
       }
 
       const remove = sessions.length - size;
+      if (sessions.length > 0) {
+        const keepSession = sessions[0]!;
+        const keepSessionId = sessionIds[0]!;
+        await h2RequestJson(keepSession, {
+          method: "POST",
+          path: ENGINE_PLANE_PATH_POOL,
+          body: { pool_target_size: size } satisfies AttestedPoolResizeRequest,
+          headers: { [HEADER_OPE_SESSION_ID]: keepSessionId },
+        }).catch(() => undefined);
+      }
       for (let i = 0; i < remove; i++) {
         const session = sessions.pop();
         const sessionId = sessionIds.pop();
         const stop = stopWorkers.pop();
         stop?.();
         if (session) {
-          if (sessionId) {
-            await h2RequestJson(session, {
-              method: "POST",
-              path: ENGINE_PLANE_PATH_POOL,
-              body: { pool_target_size: size } satisfies AttestedPoolResizeRequest,
-              headers: { [HEADER_OPE_SESSION_ID]: sessionId },
-            }).catch(() => undefined);
+      if (sessionId) {
+            await gracefulDisconnectSession(
+              session,
+              sessionId,
+              opts.connect.engine_id,
+              "admin",
+            ).catch(() => undefined);
           }
           session.close();
         }
@@ -371,6 +417,24 @@ export async function postEphemeralOnAttestedSession(opts: {
     method: "POST",
     path: ENGINE_PLANE_PATH_EPHEMERAL,
     body: opts.body,
+    headers: { [HEADER_OPE_SESSION_ID]: opts.sessionId },
+  });
+}
+
+export async function postDisconnectOnAttestedSession(opts: {
+  session: ClientHttp2Session;
+  sessionId: string;
+  engineId: string;
+  reason?: AttestedDisconnectRequest["reason"];
+}): Promise<{ status: number; json: unknown }> {
+  return h2RequestJson(opts.session, {
+    method: "POST",
+    path: ENGINE_PLANE_PATH_DISCONNECT,
+    body: {
+      engine_id: opts.engineId,
+      session_id: opts.sessionId,
+      reason: opts.reason ?? "shutdown",
+    } satisfies AttestedDisconnectRequest,
     headers: { [HEADER_OPE_SESSION_ID]: opts.sessionId },
   });
 }
