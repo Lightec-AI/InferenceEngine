@@ -2,11 +2,12 @@ import { execFileSync } from "node:child_process";
 
 import { mockAllowed } from "../build-mode.js";
 import {
+  buildGpuNotApplicableEvidence,
   buildMockNvCcGpuEvidenceEnvelope,
   encodeLegacyMockGpuEvidence,
   encodeNvCcGpuEvidenceEnvelope,
 } from "./encode.js";
-import { appendNvattestServiceArgs, nvattestBinFromEnv } from "./rim-service.js";
+import { nvattestBinFromEnv, appendNvattestAttestArgs } from "./rim-service.js";
 import type { NvattestCollectEvidenceOutput, NvCcGpuEvidenceEnvelopeV1 } from "./types.js";
 
 export interface CollectNvCcGpuEvidenceArgs {
@@ -23,7 +24,7 @@ function readConfComputeState(env: NodeJS.ProcessEnv): NvCcGpuEvidenceEnvelopeV1
   const bin = nvidiaSmiBinFromEnv(env);
   try {
     const out = execFileSync(bin, ["conf-compute", "-q"], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
-    const enabled = /CC Mode\s*:\s*ON/i.test(out);
+    const enabled = /CC State\s*:\s*ON/i.test(out) || /CC Mode\s*:\s*ON/i.test(out);
     const devTools = out.match(/DevTools\s+Attestation\s*:\s*(\S+)/i)?.[1];
     const environment = out.match(/Environment\s*:\s*(\S+)/i)?.[1];
     return {
@@ -36,6 +37,16 @@ function readConfComputeState(env: NodeJS.ProcessEnv): NvCcGpuEvidenceEnvelopeV1
   }
 }
 
+function hasCcCapableGpu(env: NodeJS.ProcessEnv): boolean {
+  try {
+    execFileSync(nvidiaSmiBinFromEnv(env), ["-L"], { stdio: ["ignore", "pipe", "pipe"] });
+    const cc = readConfComputeState(env);
+    return cc?.enabled === true;
+  } catch {
+    return false;
+  }
+}
+
 function shouldUseRealGpuCollector(env: NodeJS.ProcessEnv): boolean {
   if ((env.TEECHAT_FORCE_REAL_GPU_ATTESTATION ?? "").trim() === "1") return true;
   if ((env.TEECHAT_GPU_ATTESTATION ?? "").trim().toLowerCase() === "real") return true;
@@ -45,10 +56,7 @@ function shouldUseRealGpuCollector(env: NodeJS.ProcessEnv): boolean {
 function collectViaNvattest(args: CollectNvCcGpuEvidenceArgs): NvattestCollectEvidenceOutput {
   const env = args.env ?? process.env;
   const bin = nvattestBinFromEnv(env);
-  const cliArgs = appendNvattestServiceArgs(
-    ["collect-evidence", "--device", "gpu", "--format", "json"],
-    env,
-  );
+  const cliArgs = ["collect-evidence", "--device", "gpu", "--format", "json"];
   if (args.nonce?.trim()) {
     cliArgs.push("--nonce", args.nonce.trim());
   }
@@ -81,7 +89,7 @@ export function collectNvCcGpuEvidence(args: CollectNvCcGpuEvidenceArgs = {}): N
   const env = args.env ?? process.env;
   const ccMode = readConfComputeState(env);
 
-  if (!shouldUseRealGpuCollector(env)) {
+  if (!shouldUseRealGpuCollector(env) || !hasCcCapableGpu(env)) {
     return buildMockNvCcGpuEvidenceEnvelope();
   }
 
@@ -105,8 +113,9 @@ export function collectNvCcGpuEvidence(args: CollectNvCcGpuEvidenceArgs = {}): N
 /** Base64url evidence string for AttestationBundle.gpu_tee.evidence. */
 export function collectNvCcGpuEvidenceB64(args: CollectNvCcGpuEvidenceArgs = {}): string {
   const env = args.env ?? process.env;
-  if (!shouldUseRealGpuCollector(env)) {
-    return encodeLegacyMockGpuEvidence();
+  if (!shouldUseRealGpuCollector(env) || !hasCcCapableGpu(env)) {
+    if (mockAllowed(env)) return encodeLegacyMockGpuEvidence();
+    return buildGpuNotApplicableEvidence();
   }
   return encodeNvCcGpuEvidenceEnvelope(collectNvCcGpuEvidence(args));
 }

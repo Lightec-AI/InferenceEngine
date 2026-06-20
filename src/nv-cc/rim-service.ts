@@ -28,8 +28,8 @@ export function rimCachePathForId(rimId: string, env: NodeJS.ProcessEnv = proces
   return join(rimCacheDirFromEnv(env), `${safe}.xml`);
 }
 
-/** Append NVIDIA attestation CLI service URLs when invoking nvattest. */
-export function appendNvattestServiceArgs(args: string[], env: NodeJS.ProcessEnv = process.env): string[] {
+/** Append NVIDIA attestation CLI service URLs for `nvattest attest` (not collect-evidence). */
+export function appendNvattestAttestArgs(args: string[], env: NodeJS.ProcessEnv = process.env): string[] {
   const out = [...args];
   const rim = rimServiceBaseUrl(env);
   const ocsp = ocspServiceBaseUrl(env);

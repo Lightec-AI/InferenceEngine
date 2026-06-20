@@ -7,7 +7,7 @@ import {
   decodeNvCcGpuEvidenceEnvelope,
   isLegacyMockGpuEvidence,
 } from "./encode.js";
-import { appendNvattestServiceArgs, nvattestBinFromEnv } from "./rim-service.js";
+import { appendNvattestAttestArgs, nvattestBinFromEnv } from "./rim-service.js";
 import type {
   GpuAttestationPolicy,
   GpuEvidenceVerifyResult,
@@ -86,17 +86,9 @@ function runNvattestLocalVerify(
   const dir = mkdtempSync(join(tmpdir(), "teechat-nvattest-"));
   try {
     const evidenceFile = join(dir, "gpu_evidence.json");
-    writeFileSync(
-      evidenceFile,
-      JSON.stringify({
-        evidences: envelope.nvattest.evidences,
-        result_code: envelope.nvattest.result_code,
-        result_message: envelope.nvattest.result_message,
-      }),
-      "utf8",
-    );
+    writeFileSync(evidenceFile, JSON.stringify(envelope.nvattest.evidences), "utf8");
 
-    const args = appendNvattestServiceArgs(
+    const args = appendNvattestAttestArgs(
       [
         "attest",
         "--device",
