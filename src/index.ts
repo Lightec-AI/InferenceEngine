@@ -11,6 +11,22 @@ export {
   createFixtureProductionQuoteBackend,
   FIXTURE_INTEL_TDX_QUOTE_PLACEHOLDER,
 } from "./attestation-fixture-backend.js";
+export { createSevSnpProductionQuoteBackend } from "./attestation-sev-snp-backend.js";
+export {
+  bindReportData64,
+  buildSevSnpAttestationBundle,
+  buildSevSnpAttestedConnectRequest,
+  encodeSevSnpQuoteWrapper,
+  generateSevSnpEngineKeys,
+  isSevSnpGuestDeviceAvailable,
+  isSevSnpGuestToolAvailable,
+  parseSevSnpQuoteWrapper,
+  requestSevSnpAttestationReport,
+  resolveBinaryMeasurementsFromEnv,
+  shouldUseSevSnpAttestation,
+  verifySevSnpAttestationReport,
+  verifyWrapperReportData,
+} from "./sev-snp/index.js";
 export * from "./ephemeral.js";
 export * from "./metering.js";
 export * from "./client-trust.js";
