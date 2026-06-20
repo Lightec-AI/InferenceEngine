@@ -7,6 +7,7 @@ import {
 } from "./quote.js";
 import { requestSevSnpAttestationReport } from "./guest-report.js";
 import { resolveBinaryMeasurementsFromEnv } from "./measurements.js";
+import { collectNvCcGpuEvidenceB64 } from "../nv-cc/collect.js";
 
 export interface BuildSevSnpAttestationArgs {
   ed25519Public: string;
@@ -39,6 +40,8 @@ export function buildSevSnpAttestationBundle(args: BuildSevSnpAttestationArgs): 
   });
 
   const report = requestSevSnpAttestationReport(reportData, env);
+  const gpuNonce = reportData.subarray(0, 32).toString("hex");
+  const gpuEvidence = collectNvCcGpuEvidenceB64({ env, nonce: gpuNonce });
   const claims: QuoteClaims = {
     v: 1,
     kind: "sev-snp",
@@ -72,7 +75,7 @@ export function buildSevSnpAttestationBundle(args: BuildSevSnpAttestationArgs): 
     },
     gpu_tee: {
       kind: "nv-cc",
-      evidence: Buffer.from("gpu-tee-pending", "utf8").toString("base64url"),
+      evidence: gpuEvidence,
       verdict: "pass",
     },
     engine: claims.engine,

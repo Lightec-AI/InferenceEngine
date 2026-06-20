@@ -3,6 +3,15 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 import { mockAllowed } from "./build-mode.js";
 import type { AttestationBundle } from "./protocol/types.js";
 import { bytesToBase64Url } from "./crypto-util.js";
+import {
+  DEFAULT_GPU_ATTESTATION_POLICY,
+  type GpuAttestationPolicy,
+} from "./nv-cc/types.js";
+import {
+  resolveGpuEvidenceVerifier,
+  type GpuEvidenceVerifier,
+  type GpuEvidenceVerifyOptions,
+} from "./gpu-attestation.js";
 
 /**
  * Normalized claims extracted from a CPU TEE quote, regardless of the underlying
@@ -26,7 +35,10 @@ export interface AttestationPolicy {
   allowedEngineBinarySha256: ReadonlySet<string>;
   allowedVllmBinarySha256: ReadonlySet<string>;
   maxQuoteAgeMs: number;
+  gpu: GpuAttestationPolicy;
 }
+
+export { DEFAULT_GPU_ATTESTATION_POLICY, type GpuAttestationPolicy };
 
 /** Gateway / Skill Hub platform binary allowlists (SEC-029). */
 export interface PlatformAttestationPolicy {
@@ -52,6 +64,10 @@ export const DEFAULT_TEST_ATTESTATION_POLICY: AttestationPolicy = {
     "b2c3d4e5f6789012345678abcdef9012345678abcdef9012345678abcdef9012",
   ]),
   maxQuoteAgeMs: 24 * 60 * 60 * 1000,
+  gpu: {
+    ...DEFAULT_GPU_ATTESTATION_POLICY,
+    requireGpuAttestation: false,
+  },
 };
 
 const MOCK_ATTEST_HMAC_SECRET = Buffer.from("teechat-mock-ope-attest-v1", "utf8");
@@ -144,13 +160,18 @@ export function resolveCpuQuoteVerifier(env: NodeJS.ProcessEnv = process.env): C
   return mockAllowed(env) ? new MockCpuQuoteVerifier() : new ProductionCpuQuoteVerifier();
 }
 
+export interface VerifyAttestationBundleOptions extends GpuEvidenceVerifyOptions {
+  skipTlsCertBinding?: boolean;
+}
+
 export function verifyAttestationBundle(
   bundle: AttestationBundle,
   policy: AttestationPolicy,
   bind: { ed25519Public: string; tlsClientCertSha256: string },
   nowMs = Date.now(),
   verifier: CpuQuoteVerifier = resolveCpuQuoteVerifier(),
-  opts: { skipTlsCertBinding?: boolean } = {},
+  opts: VerifyAttestationBundleOptions = {},
+  gpuVerifier: GpuEvidenceVerifier = resolveGpuEvidenceVerifier(),
 ): AttestationVerifyResult {
   let payload: QuoteClaims | null;
   try {
@@ -193,6 +214,25 @@ export function verifyAttestationBundle(
   if (bundle.vllm.binary_sha256 !== payload.vllm.binary_sha256) {
     return { ok: false, policyId: policy.policyId, reason: "vllm_hash_bundle_mismatch" };
   }
+
+  let gpuResult;
+  try {
+    gpuResult = gpuVerifier.verify(bundle.gpu_tee.evidence, policy.gpu, nowMs, opts);
+  } catch (e) {
+    return {
+      ok: false,
+      policyId: policy.policyId,
+      reason: `gpu_attestation_backend_error: ${e instanceof Error ? e.message : String(e)}`,
+    };
+  }
+  if (!gpuResult.ok) {
+    return {
+      ok: false,
+      policyId: policy.policyId,
+      reason: gpuResult.reason ?? "invalid_gpu_evidence",
+    };
+  }
+
   if (bundle.cpu_tee.verdict !== "pass" || bundle.gpu_tee.verdict !== "pass") {
     return { ok: false, policyId: policy.policyId, reason: "verdict_not_pass" };
   }
@@ -243,7 +283,7 @@ export function verifyPlatformAttestationBundle(
     { ed25519Public: bind.ed25519Public, tlsClientCertSha256: "" },
     nowMs,
     resolveCpuQuoteVerifier(),
-    { skipTlsCertBinding: true },
+    { skipTlsCertBinding: true, skipGpuVerification: true },
   );
   if (!verdict.ok) return verdict;
   if (bundle.engine.binary_sha256.toLowerCase() !== gw) {

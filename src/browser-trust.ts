@@ -4,6 +4,11 @@
  */
 
 import type { AttestationBundle, EngineTrustBundle } from "./protocol/types.js";
+import {
+  decodeNvCcGpuEvidenceEnvelope,
+  isLegacyMockGpuEvidence,
+  LEGACY_MOCK_GPU_EVIDENCE_UTF8,
+} from "./nv-cc/encode.js";
 
 export interface BrowserAttestationPolicy {
   policyId: string;
@@ -146,12 +151,18 @@ async function parseMockCpuQuote(quote: string): Promise<QuoteClaims | null> {
   }
 }
 
-const MOCK_GPU_EVIDENCE_UTF8 = "mock-gpu-tee-evidence";
+const MOCK_GPU_EVIDENCE_UTF8 = LEGACY_MOCK_GPU_EVIDENCE_UTF8;
 
-function verifyMockGpuEvidence(evidenceB64: string): boolean {
+function verifyMockGpuEvidence(evidenceB64: string, skipGpuVerification: boolean): boolean {
+  if (skipGpuVerification) {
+    const envelope = decodeNvCcGpuEvidenceEnvelope(evidenceB64);
+    if (envelope?.not_applicable) return true;
+    return isLegacyMockGpuEvidence(evidenceB64);
+  }
   try {
-    const raw = base64UrlToBytes(evidenceB64);
-    return new TextDecoder().decode(raw) === MOCK_GPU_EVIDENCE_UTF8;
+    if (isLegacyMockGpuEvidence(evidenceB64)) return true;
+    const envelope = decodeNvCcGpuEvidenceEnvelope(evidenceB64);
+    return envelope?.source === "mock";
   } catch {
     return false;
   }
@@ -163,6 +174,7 @@ async function verifyAttestationBundleBrowser(
   bind: { ed25519Public: string; tlsClientCertSha256: string },
   nowMs: number,
   skipTlsCertBinding: boolean,
+  skipGpuVerification: boolean,
 ): Promise<BrowserTrustVerifyDetailedResult> {
   const signatures: TrustSignatureVerification[] = [];
   const cpuKind = bundle.cpu_tee.kind as CpuTeeKind;
@@ -222,12 +234,14 @@ async function verifyAttestationBundleBrowser(
     };
   }
 
-  const gpuOk = verifyMockGpuEvidence(bundle.gpu_tee.evidence);
+  const gpuOk = verifyMockGpuEvidence(bundle.gpu_tee.evidence, skipGpuVerification);
   signatures.push({
     signer: "nvidia",
-    status: gpuOk ? "mock_dev" : "failed",
+    status: gpuOk ? (skipGpuVerification ? "verified" : "mock_dev") : "failed",
     algorithm: gpuOk
-      ? "GPU confidential — mock evidence (dev)"
+      ? skipGpuVerification
+        ? "GPU confidential — not applicable (gateway platform)"
+        : "GPU confidential — mock evidence (dev)"
       : "GPU confidential — evidence signature",
     detail: gpuOk
       ? "Production verifies NVIDIA RIM / attestation report chain (see NVIDIA trust reference links in Settings)."
@@ -312,6 +326,7 @@ function isEpochActive(notBefore: string, notAfter: string, nowMs: number): bool
 
 export interface VerifyEngineTrustBundleBrowserOptions {
   skipTlsCertBinding?: boolean;
+  skipGpuVerification?: boolean;
   /** Platform attestation (SEC-029) has no ephemeral epoch signature. */
   skipIdentitySignature?: boolean;
 }
@@ -344,6 +359,7 @@ export async function verifyEngineTrustBundleBrowserDetailed(
     },
     nowMs,
     opts.skipTlsCertBinding ?? false,
+    opts.skipGpuVerification ?? false,
   );
   const evidence =
     attest.evidence ?? buildEvidence(bundle.attestation, []);

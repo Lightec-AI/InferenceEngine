@@ -13,6 +13,34 @@ export {
 } from "./attestation-fixture-backend.js";
 export { createSevSnpProductionQuoteBackend } from "./attestation-sev-snp-backend.js";
 export {
+  createNvCcProductionGpuEvidenceBackend,
+} from "./attestation-gpu-backend.js";
+export {
+  clearProductionGpuEvidenceBackend,
+  createFixtureProductionGpuEvidenceBackend,
+  isProductionGpuEvidenceBackendRegistered,
+  registerProductionGpuEvidenceBackend,
+  resolveGpuEvidenceVerifier,
+  type GpuAttestationPolicy,
+  type GpuEvidenceVerifier,
+} from "./gpu-attestation.js";
+export {
+  buildGpuNotApplicableEvidence,
+  buildMockNvCcGpuEvidenceEnvelope,
+  decodeNvCcGpuEvidenceEnvelope,
+  encodeNvCcGpuEvidenceEnvelope,
+  isLegacyMockGpuEvidence,
+} from "./nv-cc/index.js";
+export {
+  collectNvCcGpuEvidence,
+  collectNvCcGpuEvidenceB64,
+} from "./nv-cc/collect.js";
+export {
+  validateNvGpuClaimsAgainstPolicy,
+  verifyNvCcGpuEvidence,
+  verifyMockNvCcGpuEvidence,
+} from "./nv-cc/verify.js";
+export {
   bindReportData64,
   buildSevSnpAttestationBundle,
   buildSevSnpAttestedConnectRequest,
