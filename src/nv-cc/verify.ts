@@ -85,12 +85,12 @@ export function validateNvGpuClaimsAgainstPolicy(
     return { ok: false, reason: "gpu_secboot_false" };
   }
 
-  const driverVersion = String(claims["x-nvidia-gpu-driver-version"] ?? "").trim();
+  const driverVersion = String(claims["x-nvidia-gpu-driver-version"] ?? "").trim().toLowerCase();
   if (policy.allowedGpuDriverVersions.size > 0 && !policy.allowedGpuDriverVersions.has(driverVersion)) {
     return { ok: false, reason: "gpu_driver_version_not_allowed" };
   }
 
-  const vbiosVersion = String(claims["x-nvidia-gpu-vbios-version"] ?? "").trim();
+  const vbiosVersion = String(claims["x-nvidia-gpu-vbios-version"] ?? "").trim().toLowerCase();
   if (policy.allowedGpuVbiosVersions.size > 0 && !policy.allowedGpuVbiosVersions.has(vbiosVersion)) {
     return { ok: false, reason: "gpu_vbios_version_not_allowed" };
   }
