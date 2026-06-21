@@ -93,12 +93,20 @@ export interface SignedUsageReport {
   sig: string;
 }
 
+export interface GatewayPlaneTaskPayload {
+  messages: Array<{ role: string; content: string }>;
+  max_tokens?: number;
+  temperature?: number;
+}
+
 export interface OpeEnvelopeMeta {
   conversation_id?: string;
   model?: string;
   tenant?: string;
   metering?: { units?: number };
   route?: { engine_id?: string };
+  /** Gateway-origin background job (guard rewrite, metrics digest, etc.). */
+  gateway_task?: GatewayPlaneTaskPayload;
 }
 
 export interface OpeEnvelope {

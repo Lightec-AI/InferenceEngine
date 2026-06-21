@@ -7,7 +7,6 @@ import type { AttestationBundle, EngineTrustBundle } from "./protocol/types.js";
 import {
   decodeNvCcGpuEvidenceEnvelope,
   isLegacyMockGpuEvidence,
-  LEGACY_MOCK_GPU_EVIDENCE_UTF8,
 } from "./nv-cc/encode.js";
 
 export interface BrowserAttestationPolicy {
@@ -150,8 +149,6 @@ async function parseMockCpuQuote(quote: string): Promise<QuoteClaims | null> {
     return null;
   }
 }
-
-const MOCK_GPU_EVIDENCE_UTF8 = LEGACY_MOCK_GPU_EVIDENCE_UTF8;
 
 function verifyMockGpuEvidence(evidenceB64: string, skipGpuVerification: boolean): boolean {
   if (skipGpuVerification) {

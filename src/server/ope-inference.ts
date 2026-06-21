@@ -9,6 +9,7 @@ import {
 import { CONTENT_TYPE_OPE_JSON } from "../protocol/types.js";
 import {
   clampVllmMaxTokens,
+  resolveVllmBaseUrlForModel,
   streamVllmChatCompletion,
   VLLM_OUTPUT_TOKEN_LIMIT_NOTICE,
   type VllmStreamOptions,
@@ -38,6 +39,7 @@ export interface OpeInferenceOptions {
   requestId?: string;
   decryptor?: OpeInferenceDecryptor;
   vllm?: Omit<VllmStreamOptions, "messages" | "model"> & { fetchImpl?: typeof fetch };
+  taskVllm?: import("../upstream/vllm-chat.js").TaskVllmRouting;
   onUsage?: (envelope: OpeEnvelope, prefillTokens: number, completionTokens: number) => SignedUsageReport;
   chunkChars?: number;
   /** When set, emit OPE §7 NDJSON frames as ciphertext is produced (stream cipher). */
@@ -165,9 +167,16 @@ export async function runOpeInferenceOnEnvelope(
   }
 
   try {
+    const routed = resolveVllmBaseUrlForModel(
+      model,
+      { baseUrl: options.vllm.baseUrl, apiKey: options.vllm.apiKey },
+      options.taskVllm,
+    );
     for await (const delta of streamVllmChatCompletion({
       ...options.vllm,
-      model,
+      baseUrl: routed.baseUrl,
+      apiKey: routed.apiKey,
+      model: routed.model,
       messages,
       maxTokens: payloadMaxTokens ?? options.vllm?.maxTokens,
       finishState,

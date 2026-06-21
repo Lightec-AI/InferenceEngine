@@ -7,7 +7,7 @@ import {
   encodeLegacyMockGpuEvidence,
   encodeNvCcGpuEvidenceEnvelope,
 } from "./encode.js";
-import { nvattestBinFromEnv, appendNvattestAttestArgs } from "./rim-service.js";
+import { nvattestBinFromEnv } from "./rim-service.js";
 import type { NvattestCollectEvidenceOutput, NvCcGpuEvidenceEnvelopeV1 } from "./types.js";
 
 export interface CollectNvCcGpuEvidenceArgs {

@@ -115,3 +115,98 @@ export function vllmConfigFromEnv(env: NodeJS.ProcessEnv = process.env): {
   const apiKey = env.VLLM_API_KEY?.trim() || env.TEECHAT_VLLM_API_KEY?.trim();
   return { baseUrl, apiKey: apiKey || undefined };
 }
+
+/** Task vLLM upstream (localhost :8001 inside prod-engine guest). */
+export function vllmTaskConfigFromEnv(env: NodeJS.ProcessEnv = process.env): {
+  baseUrl: string;
+  apiKey?: string;
+} | null {
+  const baseUrl =
+    env.VLLM_TASK_BASE_URL?.trim() ||
+    env.TEECHAT_TASK_VLLM_BASE_URL?.trim() ||
+    env.TEECHAT_VLLM_TASK_BASE_URL?.trim();
+  if (!baseUrl) return null;
+  const apiKey =
+    env.VLLM_TASK_API_KEY?.trim() ||
+    env.TEECHAT_TASK_VLLM_API_KEY?.trim() ||
+    env.VLLM_API_KEY?.trim() ||
+    env.TEECHAT_VLLM_API_KEY?.trim();
+  return { baseUrl, apiKey: apiKey || undefined };
+}
+
+export function taskModelIdFromEnv(env: NodeJS.ProcessEnv = process.env): string | null {
+  const id =
+    env.TEECHAT_TASK_MODEL?.trim() ||
+    env.VITE_TASK_MODEL?.trim() ||
+    env.VLLM_TASK_MODEL?.trim() ||
+    env.OLLAMA_TASK_MODEL?.trim();
+  return id || null;
+}
+
+function stripModelProvider(model: string): string {
+  const at = model.indexOf("@");
+  return at >= 0 ? model.slice(0, at) : model;
+}
+
+export interface TaskVllmRouting {
+  baseUrl: string;
+  modelId: string;
+  apiKey?: string;
+}
+
+/** Route task-model ids to the task vLLM base URL; main chat models use the primary upstream. */
+export function resolveVllmBaseUrlForModel(
+  model: string,
+  main: { baseUrl: string; apiKey?: string },
+  task?: TaskVllmRouting | null,
+): { baseUrl: string; model: string; apiKey?: string } {
+  const stripped = stripModelProvider(model);
+  if (task && stripModelProvider(task.modelId) === stripped) {
+    return {
+      baseUrl: task.baseUrl,
+      model: stripped,
+      apiKey: task.apiKey ?? main.apiKey,
+    };
+  }
+  return { baseUrl: main.baseUrl, model: stripped, apiKey: main.apiKey };
+}
+
+export interface VllmCompleteOptions extends Omit<VllmStreamOptions, "finishState"> {
+  temperature?: number;
+}
+
+/** Non-streaming OpenAI-compatible chat completion (gateway background jobs). */
+export async function completeVllmChatCompletion(opts: VllmCompleteOptions): Promise<string> {
+  const fetchImpl = opts.fetchImpl ?? fetch;
+  const url = openAiChatCompletionsUrl(opts.baseUrl);
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  if (opts.apiKey?.trim()) headers.Authorization = `Bearer ${opts.apiKey.trim()}`;
+
+  const res = await fetchImpl(url, {
+    method: "POST",
+    headers,
+    signal: opts.signal,
+    body: JSON.stringify({
+      model: opts.model,
+      messages: opts.messages,
+      stream: false,
+      max_tokens: opts.maxTokens ?? maxTokensFromEnv(),
+      ...(opts.temperature !== undefined ? { temperature: opts.temperature } : {}),
+    }),
+  });
+
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new Error(`vLLM HTTP ${res.status}: ${text.slice(0, 400)}`);
+  }
+
+  const data = (await res.json()) as Record<string, unknown>;
+  const choices = data.choices;
+  if (!Array.isArray(choices) || choices.length === 0) return "";
+  const msg = choices[0] as Record<string, unknown>;
+  const message = msg.message;
+  if (!message || typeof message !== "object") return "";
+  const content = (message as Record<string, unknown>).content;
+  if (typeof content === "string") return content.trim();
+  return "";
+}

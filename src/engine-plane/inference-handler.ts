@@ -3,9 +3,13 @@ import { createHash } from "node:crypto";
 import { conversationKvKey, planVllmPrefill } from "../prefill.js";
 import type { OpeEnvelope, SignedUsageReport } from "../protocol/types.js";
 import { CONTENT_TYPE_OPE_JSON } from "../protocol/types.js";
-import { vllmConfigFromEnv } from "../upstream/vllm-chat.js";
+import { vllmConfigFromEnv, type TaskVllmRouting } from "../upstream/vllm-chat.js";
 import type { MockInferenceDecryptor } from "../server/mock-inference.js";
 import { opeInferenceRejectBody, validateOpeInferenceEnvelope } from "../server/ope-inference-gate.js";
+import {
+  isGatewayPlaneTaskEnvelope,
+  runGatewayPlaneTaskInference,
+} from "../server/gateway-plane-task-inference.js";
 import { runOpeInferenceOnEnvelope, type OpeInferenceOptions } from "../server/ope-inference.js";
 
 export interface MockInferenceOptions {
@@ -20,6 +24,8 @@ export interface MockInferenceOptions {
   delayMs?: number;
   /** When set (or `VLLM_BASE_URL` env), use real vLLM upstream instead of mock JSON body. */
   vllm?: OpeInferenceOptions["vllm"];
+  /** Task vLLM upstream for background model ids (localhost :8001 in prod-engine). */
+  taskVllm?: TaskVllmRouting;
   /** When false, ignore `VLLM_BASE_URL` / `TEECHAT_VLLM_BASE_URL` (used by gateway unit tests). */
   useEnvVllm?: boolean;
 }
@@ -56,6 +62,22 @@ export async function runMockInferenceOnEnvelope(
   body: string;
   usageHeader?: string;
 }> {
+  if (isGatewayPlaneTaskEnvelope(envelope)) {
+    const vllmEnv = options.useEnvVllm === false ? undefined : vllmConfigFromEnv();
+    const vllm =
+      options.vllm ??
+      (vllmEnv
+        ? {
+            baseUrl: vllmEnv.baseUrl,
+            apiKey: vllmEnv.apiKey,
+          }
+        : undefined);
+    return runGatewayPlaneTaskInference(envelope, {
+      ...options,
+      vllm,
+    });
+  }
+
   const gate = validateOpeInferenceEnvelope(envelope);
   if (!gate.ok) {
     return {
@@ -80,6 +102,7 @@ export async function runMockInferenceOnEnvelope(
       requestId: options.requestId,
       decryptor: options.decryptor,
       vllm,
+      taskVllm: options.taskVllm,
       onUsage: options.onInference
         ? (env, prefill, completion) => options.onInference!(env, prefill, completion)
         : undefined,

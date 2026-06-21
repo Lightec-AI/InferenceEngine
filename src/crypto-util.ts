@@ -1,14 +1,8 @@
 import { createPublicKey } from "node:crypto";
 
-export function base64UrlToBytes(s: string): Buffer {
-  const pad = s.length % 4 === 0 ? "" : "=".repeat(4 - (s.length % 4));
-  const b64 = s.replace(/-/g, "+").replace(/_/g, "/") + pad;
-  return Buffer.from(b64, "base64");
-}
+import { base64UrlToBytes } from "./base64url.js";
 
-export function bytesToBase64Url(buf: Buffer): string {
-  return buf.toString("base64url");
-}
+export { base64UrlToBytes, bytesToBase64Url } from "./base64url.js";
 
 export function ed25519PublicKeyFromBase64Url(ed25519PublicBase64Url: string) {
   const pub = base64UrlToBytes(ed25519PublicBase64Url);

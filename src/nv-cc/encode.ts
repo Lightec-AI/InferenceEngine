@@ -1,4 +1,4 @@
-import { bytesToBase64Url, base64UrlToBytes } from "../crypto-util.js";
+import { bytesToBase64Url, base64UrlToBytes } from "../base64url.js";
 import type { NvCcGpuEvidenceEnvelopeV1 } from "./types.js";
 
 export const LEGACY_MOCK_GPU_EVIDENCE_UTF8 = "mock-gpu-tee-evidence";

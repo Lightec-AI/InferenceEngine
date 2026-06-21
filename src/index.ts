@@ -105,9 +105,13 @@ export {
 } from "./server/ope-inference-gate.js";
 export {
   clampVllmMaxTokens,
+  completeVllmChatCompletion,
   maxTokensFromEnv,
   openAiChatCompletionsUrl,
+  resolveVllmBaseUrlForModel,
   streamVllmChatCompletion,
+  taskModelIdFromEnv,
+  vllmTaskConfigFromEnv,
   VLLM_MAX_TOKENS_DEFAULT,
   vllmConfigFromEnv,
 } from "./upstream/vllm-chat.js";
@@ -118,3 +122,9 @@ export {
   resolveOpenAiCompatibleUpstream,
   type OpenAiCompatibleUpstreamProbe,
 } from "./upstream/openai-compatible-upstream.js";
+export {
+  GATEWAY_PLANE_TASK_ENC,
+  isGatewayPlaneTaskEnvelope,
+  runGatewayPlaneTaskInference,
+  validateGatewayPlaneTaskEnvelope,
+} from "./server/gateway-plane-task-inference.js";
