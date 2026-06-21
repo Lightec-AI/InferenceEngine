@@ -19,6 +19,44 @@ function claimBool(claims: Record<string, unknown>, key: string): boolean {
   return claims[key] === true;
 }
 
+function certChainValidated(claims: Record<string, unknown>): boolean {
+  if (claimBool(claims, "x-nvidia-gpu-attestation-report-cert-chain-validated")) return true;
+  const chain = claims["x-nvidia-gpu-attestation-report-cert-chain"];
+  if (!chain || typeof chain !== "object") return false;
+  const rec = chain as Record<string, unknown>;
+  return rec["x-nvidia-cert-status"] === "valid" && rec["x-nvidia-cert-ocsp-status"] === "good";
+}
+
+function rimSchemaValidated(claims: Record<string, unknown>, kind: "driver" | "vbios"): boolean {
+  const flatKey =
+    kind === "driver"
+      ? "x-nvidia-gpu-driver-rim-schema-validated"
+      : "x-nvidia-gpu-vbios-rim-schema-validated";
+  if (claimBool(claims, flatKey)) return true;
+  const sigKey =
+    kind === "driver"
+      ? "x-nvidia-gpu-driver-rim-signature-verified"
+      : "x-nvidia-gpu-vbios-rim-signature-verified";
+  const matchKey =
+    kind === "driver"
+      ? "x-nvidia-gpu-driver-rim-version-match"
+      : "x-nvidia-gpu-vbios-rim-version-match";
+  return claimBool(claims, sigKey) && claimBool(claims, matchKey);
+}
+
+function claimRequiredTrue(claims: Record<string, unknown>, key: string): boolean {
+  switch (key) {
+    case "x-nvidia-gpu-attestation-report-cert-chain-validated":
+      return certChainValidated(claims);
+    case "x-nvidia-gpu-driver-rim-schema-validated":
+      return rimSchemaValidated(claims, "driver");
+    case "x-nvidia-gpu-vbios-rim-schema-validated":
+      return rimSchemaValidated(claims, "vbios");
+    default:
+      return claimBool(claims, key);
+  }
+}
+
 /** Validate nvattest local-verifier claims against TeaChat GPU policy. */
 export function validateNvGpuClaimsAgainstPolicy(
   claims: Record<string, unknown>,
@@ -35,7 +73,7 @@ export function validateNvGpuClaimsAgainstPolicy(
   ] as const;
 
   for (const key of requiredTrue) {
-    if (!claimBool(claims, key)) {
+    if (!claimRequiredTrue(claims, key)) {
       return { ok: false, reason: `gpu_claim_${key}` };
     }
   }
@@ -182,7 +220,11 @@ export function verifyNvCcGpuEvidence(
   const attest = runNvattestLocalVerify(envelope, env);
   if (!attest.ok) return attest;
 
-  for (const claims of attest.claims) {
+  for (const rawClaims of attest.claims) {
+    const claims: Record<string, unknown> = { ...rawClaims };
+    if (!claims["x-nvidia-gpu-architecture"] && !claims.arch && envelope.measurements?.architecture) {
+      claims["x-nvidia-gpu-architecture"] = envelope.measurements.architecture;
+    }
     const verdict = validateNvGpuClaimsAgainstPolicy(claims, policy);
     if (!verdict.ok) return verdict;
   }

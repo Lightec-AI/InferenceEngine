@@ -36,6 +36,36 @@ describe("nv-cc GPU attestation", () => {
     expect(verdict.ok).toBe(true);
   });
 
+  it("accepts nvattest 1.2.x nested cert-chain and rim schema claims", () => {
+    const policy = {
+      ...DEFAULT_GPU_ATTESTATION_POLICY,
+      allowedGpuDriverVersions: new Set(["595.71.05"]),
+      allowedGpuVbiosVersions: new Set(["98.02.8D.00.01"]),
+      allowedGpuArchitectures: new Set(["blackwell"]),
+    };
+    const verdict = validateNvGpuClaimsAgainstPolicy(
+      {
+        "x-nvidia-gpu-driver-rim-signature-verified": true,
+        "x-nvidia-gpu-vbios-rim-signature-verified": true,
+        "x-nvidia-gpu-attestation-report-cert-chain": {
+          "x-nvidia-cert-status": "valid",
+          "x-nvidia-cert-ocsp-status": "good",
+        },
+        "x-nvidia-gpu-attestation-report-signature-verified": true,
+        "x-nvidia-gpu-driver-rim-version-match": true,
+        "x-nvidia-gpu-vbios-rim-version-match": true,
+        "x-nvidia-gpu-arch-check": true,
+        measres: "success",
+        secboot: true,
+        "x-nvidia-gpu-driver-version": "595.71.05",
+        "x-nvidia-gpu-vbios-version": "98.02.8D.00.01",
+        "x-nvidia-gpu-architecture": "BLACKWELL",
+      },
+      policy,
+    );
+    expect(verdict.ok).toBe(true);
+  });
+
   it("rejects driver version outside allowlist", () => {
     const policy = {
       ...DEFAULT_GPU_ATTESTATION_POLICY,
