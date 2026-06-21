@@ -40,7 +40,7 @@ describe("nv-cc GPU attestation", () => {
     const policy = {
       ...DEFAULT_GPU_ATTESTATION_POLICY,
       allowedGpuDriverVersions: new Set(["595.71.05"]),
-      allowedGpuVbiosVersions: new Set(["98.02.8D.00.01"]),
+      allowedGpuVbiosVersions: new Set(["98.02.8d.00.01"]),
       allowedGpuArchitectures: new Set(["blackwell"]),
     };
     const verdict = validateNvGpuClaimsAgainstPolicy(
