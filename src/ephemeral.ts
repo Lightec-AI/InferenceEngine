@@ -43,8 +43,15 @@ export function parseIsoTime(s: string): number {
   return t;
 }
 
-export function isEpochActive(notBefore: string, notAfter: string, nowMs = Date.now()): boolean {
+/** When `skewMs > 0`, allow `now` slightly before `not_before` or after `not_after` (clock skew). */
+export function isEpochActive(
+  notBefore: string,
+  notAfter: string,
+  nowMs = Date.now(),
+  skewMs = 0,
+): boolean {
   const start = parseIsoTime(notBefore);
   const end = parseIsoTime(notAfter);
-  return nowMs >= start && nowMs <= end;
+  const grace = Math.max(0, skewMs);
+  return nowMs >= start - grace && nowMs <= end + grace;
 }
