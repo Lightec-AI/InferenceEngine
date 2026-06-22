@@ -140,7 +140,7 @@ export async function runOpeInferenceOnEnvelope(
 
   const provider = options.decryptor.provider;
   const { session, serverShare } = provider.beginResponse(options.decryptor.handle, envelope);
-  const chunkChars = options.chunkChars ?? 64;
+  const chunkChars = options.chunkChars ?? 8;
   const chunks: string[] = [];
   let pending = "";
   let fullText = "";
