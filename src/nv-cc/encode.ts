@@ -4,14 +4,27 @@ import type { NvCcGpuEvidenceEnvelopeV1 } from "./types.js";
 export const LEGACY_MOCK_GPU_EVIDENCE_UTF8 = "mock-gpu-tee-evidence";
 export const LEGACY_PENDING_GPU_EVIDENCE_UTF8 = "gpu-tee-pending";
 
+/** Decode base64url to UTF-8 in browser/Tauri webviews where Node `Buffer` is unavailable. */
+function base64UrlToUtf8(s: string): string {
+  if (typeof Buffer !== "undefined") {
+    return base64UrlToBytes(s).toString("utf8");
+  }
+  let b64 = s.replace(/-/g, "+").replace(/_/g, "/");
+  const rem = b64.length % 4;
+  if (rem) b64 += "=".repeat(4 - rem);
+  const bin = atob(b64);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  return new TextDecoder().decode(bytes);
+}
+
 export function encodeNvCcGpuEvidenceEnvelope(envelope: NvCcGpuEvidenceEnvelopeV1): string {
   return bytesToBase64Url(Buffer.from(JSON.stringify(envelope), "utf8"));
 }
 
 export function decodeNvCcGpuEvidenceEnvelope(evidenceB64: string): NvCcGpuEvidenceEnvelopeV1 | null {
   try {
-    const raw = base64UrlToBytes(evidenceB64);
-    const text = raw.toString("utf8");
+    const text = base64UrlToUtf8(evidenceB64);
     if (text === LEGACY_MOCK_GPU_EVIDENCE_UTF8 || text === LEGACY_PENDING_GPU_EVIDENCE_UTF8) {
       return null;
     }
@@ -28,8 +41,7 @@ export function decodeNvCcGpuEvidenceEnvelope(evidenceB64: string): NvCcGpuEvide
 
 export function isLegacyMockGpuEvidence(evidenceB64: string): boolean {
   try {
-    const raw = base64UrlToBytes(evidenceB64);
-    const text = raw.toString("utf8");
+    const text = base64UrlToUtf8(evidenceB64);
     return text === LEGACY_MOCK_GPU_EVIDENCE_UTF8 || text === LEGACY_PENDING_GPU_EVIDENCE_UTF8;
   } catch {
     return false;

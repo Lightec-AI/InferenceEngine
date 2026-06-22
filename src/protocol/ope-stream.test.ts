@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { encodeOpeStreamLine, parseOpeStreamLine } from "./ope-stream.js";
+import { encodeOpeStreamLine, encodeOpeStatusLine, parseOpeStreamLine } from "./ope-stream.js";
 
 describe("ope-stream framing", () => {
   it("round-trips header and chunk lines", () => {
@@ -33,6 +33,15 @@ describe("ope-stream framing", () => {
       ope_stream: "1.0",
       type: "trailer",
       usage_report: "usage-b64",
+    });
+  });
+
+  it("parses plaintext status frames", () => {
+    const line = encodeOpeStatusLine("thinking");
+    expect(parseOpeStreamLine(line.toString("utf8").trim())).toEqual({
+      ope_stream: "1.0",
+      type: "status",
+      phase: "thinking",
     });
   });
 });
