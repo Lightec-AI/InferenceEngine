@@ -20,3 +20,7 @@ export {
   type TrustSignatureStatus,
   type TrustSignatureVerification,
 } from "./browser-trust.js";
+export {
+  decodeNvCcGpuEvidenceEnvelope,
+  isLegacyMockGpuEvidence,
+} from "./nv-cc/encode.js";
