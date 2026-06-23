@@ -18,6 +18,7 @@ import {
   type EngineEphemeralRegisterRequest,
   type OpeEnvelope,
 } from "../protocol/types.js";
+import { CONTENT_TYPE_OPE_JSON_STREAM } from "../protocol/ope-stream.js";
 import type { GatewayMtlsTlsMaterial } from "../client/gateway-mtls.js";
 import {
   verifyPlatformAttestationBundle,
@@ -30,7 +31,13 @@ import {
   logEngineWorkAssigned,
 } from "../ops/engine-events.js";
 import { configureEventLogFromEnv } from "../ops/event-log.js";
-import { runMockInferenceOnEnvelope, type MockInferenceOptions } from "./inference-handler.js";
+import { vllmConfigFromEnv } from "../upstream/vllm-chat.js";
+import {
+  isGatewayPlaneTaskEnvelope,
+  runMockInferenceOnEnvelope,
+  type MockInferenceOptions,
+} from "./inference-handler.js";
+import type { OpeNdjsonStreamWriter } from "../server/ope-inference.js";
 
 export const ENGINE_PLANE_PATH_INFERENCE_RESULT = `${INFERENCE_PATH}/result`;
 
@@ -206,6 +213,14 @@ async function gracefulDisconnectSession(
   }
 }
 
+function wantsOpeVllmNdjsonStream(envelope: OpeEnvelope, inference: MockInferenceOptions): boolean {
+  if (isGatewayPlaneTaskEnvelope(envelope)) return false;
+  if (!inference.decryptor) return false;
+  if (inference.vllm?.baseUrl) return true;
+  if (inference.useEnvVllm === false) return false;
+  return Boolean(vllmConfigFromEnv()?.baseUrl);
+}
+
 function startPullWorker(
   session: ClientHttp2Session,
   sessionId: string,
@@ -253,14 +268,13 @@ function startPullWorker(
         try {
           const envelope = JSON.parse(Buffer.concat(workChunks).toString("utf8")) as OpeEnvelope;
           let resultStream: import("node:http2").ClientHttp2Stream | undefined;
+          let openedStreamingResult = false;
 
-          const { status, contentType, body, usageHeader } = await runMockInferenceOnEnvelope(envelope, {
-            ...inference,
-            requestId,
-          });
-          logEngineWorkAssigned(requestId, Date.now() - startedAt);
-
-          if (contentType !== "application/ope+json-stream") {
+          const openInferenceResultStream = (
+            contentType: string,
+            status: number,
+            usageHeader?: string,
+          ): import("node:http2").ClientHttp2Stream => {
             resultStream = session.request({
               ":method": "POST",
               ":path": ENGINE_PLANE_PATH_INFERENCE_RESULT,
@@ -270,16 +284,48 @@ function startPullWorker(
               "x-ope-status": String(status),
               ...(usageHeader ? { [HEADER_USAGE_REPORT]: usageHeader } : {}),
             });
-            resultStream.end(body);
-          } else if (usageHeader && resultStream) {
-            try {
-              const streamWithTrailers = resultStream as import("node:http2").ClientHttp2Stream & {
-                addTrailers?: (trailers: Record<string, string>) => void;
-              };
-              streamWithTrailers.addTrailers?.({ [HEADER_USAGE_REPORT]: usageHeader });
-            } catch {
-              /* trailers unsupported — trailer frame in body is authoritative */
+            return resultStream;
+          };
+
+          let ndjsonStream: OpeNdjsonStreamWriter | undefined;
+          if (wantsOpeVllmNdjsonStream(envelope, inference)) {
+            openInferenceResultStream(CONTENT_TYPE_OPE_JSON_STREAM, 200);
+            openedStreamingResult = true;
+            ndjsonStream = {
+              write: (chunk) => {
+                resultStream!.write(chunk);
+              },
+              end: () => {
+                resultStream!.end();
+              },
+            };
+          }
+
+          const { status, contentType, body, usageHeader } = await runMockInferenceOnEnvelope(envelope, {
+            ...inference,
+            requestId,
+            ndjsonStream,
+          });
+          logEngineWorkAssigned(requestId, Date.now() - startedAt);
+
+          if (contentType === CONTENT_TYPE_OPE_JSON_STREAM) {
+            if (usageHeader && resultStream) {
+              try {
+                const streamWithTrailers = resultStream as import("node:http2").ClientHttp2Stream & {
+                  addTrailers?: (trailers: Record<string, string>) => void;
+                };
+                streamWithTrailers.addTrailers?.({ [HEADER_USAGE_REPORT]: usageHeader });
+              } catch {
+                /* trailers unsupported — trailer frame in body is authoritative */
+              }
             }
+          } else {
+            if (openedStreamingResult && resultStream && !resultStream.writableEnded) {
+              resultStream.destroy();
+              resultStream = undefined;
+            }
+            resultStream = openInferenceResultStream(contentType, status, usageHeader);
+            resultStream.end(body);
           }
 
           if (!resultStream) {
@@ -291,7 +337,7 @@ function startPullWorker(
               resolve();
               return;
             }
-            resultStream!.on("end", () => resolve());
+            resultStream!.on("finish", () => resolve());
             resultStream!.on("error", reject);
           });
         } catch (e) {

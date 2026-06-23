@@ -10,7 +10,11 @@ import {
   isGatewayPlaneTaskEnvelope,
   runGatewayPlaneTaskInference,
 } from "../server/gateway-plane-task-inference.js";
-import { runOpeInferenceOnEnvelope, type OpeInferenceOptions } from "../server/ope-inference.js";
+import {
+  runOpeInferenceOnEnvelope,
+  type OpeInferenceOptions,
+  type OpeNdjsonStreamWriter,
+} from "../server/ope-inference.js";
 
 export interface MockInferenceOptions {
   requestId?: string;
@@ -28,6 +32,8 @@ export interface MockInferenceOptions {
   taskVllm?: TaskVllmRouting;
   /** When false, ignore `VLLM_BASE_URL` / `TEECHAT_VLLM_BASE_URL` (used by gateway unit tests). */
   useEnvVllm?: boolean;
+  /** Emit OPE §7 NDJSON frames on the engine→gateway inference result stream. */
+  ndjsonStream?: OpeNdjsonStreamWriter;
 }
 
 interface DecryptedChatPayload {
@@ -103,6 +109,7 @@ export async function runMockInferenceOnEnvelope(
       decryptor: options.decryptor,
       vllm,
       taskVllm: options.taskVllm,
+      ndjsonStream: options.ndjsonStream,
       onUsage: options.onInference
         ? (env, prefill, completion) => options.onInference!(env, prefill, completion)
         : undefined,
