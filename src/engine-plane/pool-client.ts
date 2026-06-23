@@ -32,11 +32,8 @@ import {
 } from "../ops/engine-events.js";
 import { configureEventLogFromEnv } from "../ops/event-log.js";
 import { vllmConfigFromEnv } from "../upstream/vllm-chat.js";
-import {
-  isGatewayPlaneTaskEnvelope,
-  runMockInferenceOnEnvelope,
-  type MockInferenceOptions,
-} from "./inference-handler.js";
+import { isGatewayPlaneTaskEnvelope } from "../server/gateway-plane-task-inference.js";
+import { runMockInferenceOnEnvelope, type MockInferenceOptions } from "./inference-handler.js";
 import type { OpeNdjsonStreamWriter } from "../server/ope-inference.js";
 
 export const ENGINE_PLANE_PATH_INFERENCE_RESULT = `${INFERENCE_PATH}/result`;
