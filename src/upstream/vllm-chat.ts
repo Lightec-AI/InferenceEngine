@@ -46,6 +46,23 @@ export function openAiChatCompletionsUrl(baseUrl: string): string {
   return `${base}/v1/chat/completions`;
 }
 
+type VllmStreamChoice = {
+  delta?: { content?: string | null; reasoning_content?: string | null };
+  message?: { content?: string | null };
+  finish_reason?: string | null;
+};
+
+/** Extract assistant text from one vLLM/OpenAI streaming chunk. */
+export function streamTextFromVllmChoice(choice: VllmStreamChoice | undefined): string | undefined {
+  const deltaContent = choice?.delta?.content;
+  if (typeof deltaContent === "string" && deltaContent.length > 0) return deltaContent;
+  const reasoning = choice?.delta?.reasoning_content;
+  if (typeof reasoning === "string" && reasoning.length > 0) return reasoning;
+  const messageContent = choice?.message?.content;
+  if (typeof messageContent === "string" && messageContent.length > 0) return messageContent;
+  return undefined;
+}
+
 /** Stream completion text deltas from an OpenAI-compatible vLLM `/v1/chat/completions`. */
 export async function* streamVllmChatCompletion(
   opts: VllmStreamOptions,
@@ -89,16 +106,14 @@ export async function* streamVllmChatCompletion(
       const data = trimmed.slice(5).trim();
       if (data === "[DONE]") return;
       try {
-        const chunk = JSON.parse(data) as {
-          choices?: Array<{ delta?: { content?: string }; finish_reason?: string | null }>;
-        };
+        const chunk = JSON.parse(data) as { choices?: VllmStreamChoice[] };
         const choice = chunk.choices?.[0];
         const finish = choice?.finish_reason;
         if (finish && finish !== "null") {
           if (opts.finishState) opts.finishState.reason = finish;
         }
-        const delta = choice?.delta?.content;
-        if (delta) yield delta;
+        const text = streamTextFromVllmChoice(choice);
+        if (text) yield text;
       } catch {
         /* ignore malformed SSE lines */
       }

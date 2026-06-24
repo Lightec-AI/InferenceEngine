@@ -4,6 +4,7 @@ import { conversationKvKey, planVllmPrefill } from "../prefill.js";
 import type { OpeEnvelope, SignedUsageReport } from "../protocol/types.js";
 import {
   CONTENT_TYPE_OPE_JSON_STREAM,
+  encodeOpeStatusLine,
   encodeOpeStreamLine,
 } from "../protocol/ope-stream.js";
 import { CONTENT_TYPE_OPE_JSON } from "../protocol/types.js";
@@ -195,6 +196,18 @@ export async function runOpeInferenceOnEnvelope(
     }
     if (pending.length > 0) {
       emitEncryptedPiece(pending, true);
+    } else if (!fullText.trim()) {
+      const reason = finishState.reason ?? "unknown";
+      logEngineVllmUpstreamError(
+        options.requestId,
+        undefined,
+        new Error(`vLLM empty completion (finish_reason=${reason})`),
+      );
+      if (streamOut) {
+        streamOut.write(
+          encodeOpeStatusLine("streaming", { detail: `empty_completion:${reason}` }),
+        );
+      }
     }
   } catch (e) {
     provider.freeResponse(session);
