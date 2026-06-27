@@ -42,6 +42,42 @@ export function logEngineEphemeralRegisterFailed(engineId: string, status: numbe
   });
 }
 
+export function logEngineEpochRotateSuccess(
+  engineId: string,
+  epochId: string,
+  notAfter: string,
+): void {
+  logEvent("info", "inference.engine", "epoch_rotate_success", {
+    engineId,
+    epochId,
+    notAfter,
+  });
+}
+
+export function logEngineEpochRotateFailed(
+  engineId: string,
+  status: number,
+  detail: string,
+): void {
+  logEvent("warn", "inference.engine", "epoch_rotate_failed", {
+    engineId,
+    status,
+    detail: detail.slice(0, 200),
+  });
+}
+
+export function logEngineSessionReconnect(
+  engineId: string,
+  sessionId: string,
+  attempt: number,
+): void {
+  logEvent("info", "inference.engine", "pool_session_reconnect", {
+    engineId,
+    sessionId,
+    attempt,
+  });
+}
+
 export function logEngineShutdown(engineId: string, buildId?: string): void {
   logEvent("info", "inference.engine", "shutdown", {
     engineId,

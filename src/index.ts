@@ -62,6 +62,11 @@ export * from "./build-mode.js";
 export * from "./crypto/provider.js";
 export * from "./engine/epoch.js";
 export * from "./engine/supervisor.js";
+export * from "./engine/epoch-rotation-policy.js";
+export * from "./engine/epoch-rotator.js";
+export * from "./engine/rotating-decryptor.js";
+export * from "./engine/decrypt-handle.js";
+export * from "./engine/supervised-pool.js";
 export * from "./client/ope-client.js";
 export * from "./client/gateway-mtls.js";
 export * from "./engine-plane/pool-client.js";
@@ -69,6 +74,9 @@ export { configureEventLogFromEnv, setEventLogLevel, setEventLogSink } from "./o
 export {
   logEngineEphemeralRegisterFailed,
   logEnginePoolConnect,
+  logEngineEpochRotateSuccess,
+  logEngineEpochRotateFailed,
+  logEngineSessionReconnect,
   logEngineShutdown,
   logEngineVllmUpstreamError,
   logEngineWorkAssigned,

@@ -113,7 +113,7 @@ function h2RequestJson(
   });
 }
 
-async function openPooledConnection(
+export async function openPooledConnection(
   opts: EnginePlanePoolClientOptions,
   sessionId: string,
 ): Promise<ClientHttp2Session> {
@@ -218,7 +218,7 @@ function wantsOpeVllmNdjsonStream(envelope: OpeEnvelope, inference: MockInferenc
   return Boolean(vllmConfigFromEnv()?.baseUrl);
 }
 
-function startPullWorker(
+export function startPullWorker(
   session: ClientHttp2Session,
   sessionId: string,
   inference: MockInferenceOptions,

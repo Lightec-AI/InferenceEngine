@@ -22,6 +22,7 @@ import {
 import type { MockInferenceDecryptor } from "./mock-inference.js";
 import { logEngineVllmUpstreamError } from "../ops/engine-events.js";
 import { opeInferenceRejectBody, validateOpeInferenceEnvelope } from "./ope-inference-gate.js";
+import { resolveDecryptHandle } from "../engine/decrypt-handle.js";
 
 export interface OpeInferenceDecryptor extends MockInferenceDecryptor {}
 
@@ -118,7 +119,7 @@ export async function runOpeInferenceOnEnvelope(
   let payload: DecryptedChatPayload;
   try {
     payload = options.decryptor.provider.decryptRequest(
-      options.decryptor.handle,
+      resolveDecryptHandle(options.decryptor, envelope),
       envelope,
     ) as DecryptedChatPayload;
   } catch (e) {
@@ -140,7 +141,8 @@ export async function runOpeInferenceOnEnvelope(
   const messages = normalizeVllmMessages(payload.messages ?? []);
 
   const provider = options.decryptor.provider;
-  const { session, serverShare } = provider.beginResponse(options.decryptor.handle, envelope);
+  const decryptHandle = resolveDecryptHandle(options.decryptor, envelope);
+  const { session, serverShare } = provider.beginResponse(decryptHandle, envelope);
   const chunkChars = options.chunkChars ?? 8;
   const chunks: string[] = [];
   let pending = "";

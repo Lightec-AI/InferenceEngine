@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 
 import { conversationKvKey, planVllmPrefill } from "../prefill.js";
 import type { OpeEnvelope, SignedUsageReport } from "../protocol/types.js";
+import { resolveDecryptHandle } from "../engine/decrypt-handle.js";
 import { CONTENT_TYPE_OPE_JSON } from "../protocol/types.js";
 import { vllmConfigFromEnv, type TaskVllmRouting } from "../upstream/vllm-chat.js";
 import type { MockInferenceDecryptor } from "../server/mock-inference.js";
@@ -131,7 +132,7 @@ export async function runMockInferenceOnEnvelope(
   let promptTokens: number;
   try {
     const payload = options.decryptor.provider.decryptRequest(
-      options.decryptor.handle,
+      resolveDecryptHandle(options.decryptor, envelope),
       envelope,
     ) as DecryptedChatPayload;
     promptTokens = promptTokensFromPayload(payload);
