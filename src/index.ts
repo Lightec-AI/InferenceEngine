@@ -67,6 +67,10 @@ export * from "./engine/epoch-rotator.js";
 export * from "./engine/rotating-decryptor.js";
 export * from "./engine/decrypt-handle.js";
 export * from "./engine/supervised-pool.js";
+export {
+  createEngineAttestationRefresher,
+  type EngineAttestationRefreshContext,
+} from "./engine/attestation-refresh.js";
 export * from "./client/ope-client.js";
 export * from "./client/gateway-mtls.js";
 export * from "./engine-plane/pool-client.js";

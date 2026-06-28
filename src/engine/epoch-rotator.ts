@@ -52,6 +52,8 @@ export interface EpochRotator {
   stop(): void;
   /** Force immediate rotation (tests / recovery). */
   rotateNow(): Promise<void>;
+  /** Keep ephemeral register payloads aligned with refreshed connect attestation. */
+  setAttestation(bundle: AttestationBundle): void;
 }
 
 export function createEpochRotator(opts: EpochRotatorOptions): EpochRotator {
@@ -62,11 +64,12 @@ export function createEpochRotator(opts: EpochRotatorOptions): EpochRotator {
   const setTimer = opts.setTimeoutFn ?? setTimeout;
   const clearTimer = opts.clearTimeoutFn ?? clearTimeout;
 
+  let attestation = opts.attestation;
   let current: EngineEpoch = createEngineEpoch({
     engineId: opts.engineId,
     ed25519PublicB64: opts.ed25519PublicB64,
     ed25519PrivateKey: opts.ed25519PrivateKey,
-    attestation: opts.attestation,
+    attestation,
     ttlMs,
     provider: opts.provider,
   });
@@ -115,7 +118,7 @@ export function createEpochRotator(opts: EpochRotatorOptions): EpochRotator {
         engineId: opts.engineId,
         ed25519PublicB64: opts.ed25519PublicB64,
         ed25519PrivateKey: opts.ed25519PrivateKey,
-        attestation: opts.attestation,
+        attestation,
         ttlMs,
         provider: opts.provider,
       });
@@ -154,6 +157,9 @@ export function createEpochRotator(opts: EpochRotatorOptions): EpochRotator {
       }
     },
     rotateNow: rotateInternal,
+    setAttestation(bundle: AttestationBundle) {
+      attestation = bundle;
+    },
   };
 }
 

@@ -93,4 +93,43 @@ describe("epoch rotator", () => {
     expect(rotator.currentEpoch().epochId).not.toBe(firstId);
     rotator.stop();
   });
+
+  it("uses refreshed attestation on later epoch rotations", async () => {
+    const provider = createMockProvider();
+    const { pub, priv } = ed25519Pair();
+    const { buildMockAttestationBundle } = await import("../src/testing/mock-keys.js");
+    const stale = buildMockAttestationBundle({
+      ed25519Public: pub,
+      tlsClientCertSha256: "aa".repeat(32),
+    });
+    const fresh = buildMockAttestationBundle({
+      ed25519Public: pub,
+      tlsClientCertSha256: "aa".repeat(32),
+    });
+    const rotator = createEpochRotator({
+      engineId: "eng-att",
+      ed25519PublicB64: pub,
+      ed25519PrivateKey: priv,
+      attestation: stale,
+      provider,
+      policy: { rotationIntervalMs: 86_400_000, overlapGraceMs: 0 },
+      listSessions: () => [
+        {
+          session: { closed: false, destroyed: false } as never,
+          sessionId: "s1",
+        },
+      ],
+    });
+
+    const poolClient = await import("../src/engine-plane/pool-client.js");
+    vi.spyOn(poolClient, "postEphemeralOnAttestedSession").mockResolvedValue({
+      status: 201,
+      json: {},
+    });
+
+    rotator.setAttestation(fresh);
+    await rotator.rotateNow();
+    expect(rotator.currentEpoch().ephemeralRequest.attestation).toBe(fresh);
+    rotator.stop();
+  });
 });

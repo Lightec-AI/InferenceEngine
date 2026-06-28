@@ -26,6 +26,10 @@ import { createEpochRotator, type EpochRotator } from "./epoch-rotator.js";
 import { createRotatingEpochDecryptor, type RotatingEpochDecryptor } from "./rotating-decryptor.js";
 import type { EngineEpoch } from "./epoch.js";
 import { epochRotationPolicyFromEnv } from "./supervisor.js";
+import {
+  createEngineAttestationRefresher,
+  type EngineAttestationRefreshContext,
+} from "./attestation-refresh.js";
 
 const RECONNECT_BASE_MS = 1_000;
 const RECONNECT_MAX_MS = 30_000;
@@ -38,6 +42,11 @@ export interface SupervisedEnginePlanePoolOptions extends EnginePlanePoolClientO
   provider: CryptoProvider;
   /** When false, behaves like legacy pool (no rotation/reconnect). Default true. */
   supervised?: boolean;
+  /** TLS client cert hash for attestation binding; enables fresh quotes on reconnect. */
+  tlsClientCertSha256?: string;
+  /** Override reconnect attestation refresh (defaults from tlsClientCertSha256). */
+  refreshAttestation?: () => AttestationBundle;
+  attestationRefresh?: Pick<EngineAttestationRefreshContext, "useSevSnp" | "env" | "root">;
 }
 
 export interface SupervisedEnginePlanePool {
@@ -77,6 +86,19 @@ export async function createSupervisedEnginePlanePool(
   const slots: SessionSlot[] = [];
   let closed = false;
   let pruneTimer: ReturnType<typeof setInterval> | null = null;
+  let connect = opts.connect;
+
+  const refreshAttestation =
+    opts.refreshAttestation ??
+    (opts.tlsClientCertSha256
+      ? createEngineAttestationRefresher({
+          ed25519Public: opts.ed25519PublicB64,
+          tlsClientCertSha256: opts.tlsClientCertSha256,
+          useSevSnp: opts.attestationRefresh?.useSevSnp,
+          env: opts.attestationRefresh?.env,
+          root: opts.attestationRefresh?.root,
+        })
+      : undefined);
 
   const listSessions = () =>
     slots
@@ -95,6 +117,18 @@ export async function createSupervisedEnginePlanePool(
     onEpochRotated: (epoch) => {
       decryptor.addEpoch(epoch);
     },
+  });
+
+  const applyFreshAttestation = (): void => {
+    if (!refreshAttestation) return;
+    const fresh = refreshAttestation();
+    connect = { ...connect, attestation: fresh };
+    rotator.setAttestation(fresh);
+  };
+
+  const poolConnectOpts = (): EnginePlanePoolClientOptions => ({
+    ...opts,
+    connect,
   });
 
   decryptor = createRotatingEpochDecryptor(rotator.currentEpoch(), policy.overlapGraceMs);
@@ -143,7 +177,8 @@ export async function createSupervisedEnginePlanePool(
       slot.stopWorker();
       if (!slot.session.destroyed) slot.session.close();
       const sessionId = randomUUID();
-      const session = await openPooledConnection(opts, sessionId);
+      applyFreshAttestation();
+      const session = await openPooledConnection(poolConnectOpts(), sessionId);
       slot.sessionId = sessionId;
       slot.session = session;
       slot.reconnectAttempt = 0;
@@ -176,7 +211,7 @@ export async function createSupervisedEnginePlanePool(
 
   for (let i = 0; i < opts.poolTargetSize; i++) {
     const sessionId = randomUUID();
-    const session = await openPooledConnection(opts, sessionId);
+    const session = await openPooledConnection(poolConnectOpts(), sessionId);
     const slot: SessionSlot = {
       sessionId,
       session,
