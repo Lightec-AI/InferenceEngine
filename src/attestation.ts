@@ -1,5 +1,11 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 
+import {
+  verifyGoldenImageClaimsAgainstPolicy,
+  type GoldenAttestationPolicy,
+  type GoldenImageClaims,
+} from "./golden-policy.js";
+
 import { mockAllowed } from "./build-mode.js";
 import type { AttestationBundle } from "./protocol/types.js";
 import { bytesToBase64Url } from "./crypto-util.js";
@@ -25,7 +31,11 @@ export interface QuoteClaims {
   engine: { version: string; binary_sha256: string };
   vllm: { version: string; binary_sha256: string };
   issued_at: string;
+  /** Present when prod-engine runs from a golden dm-verity image (Phase 2). */
+  golden?: GoldenImageClaims;
 }
+
+export type { GoldenAttestationPolicy, GoldenImageClaims };
 
 /** @deprecated Use {@link QuoteClaims}; retained for the mock quote builder. */
 export type MockCpuQuotePayload = QuoteClaims;
@@ -36,6 +46,7 @@ export interface AttestationPolicy {
   allowedVllmBinarySha256: ReadonlySet<string>;
   maxQuoteAgeMs: number;
   gpu: GpuAttestationPolicy;
+  golden?: GoldenAttestationPolicy;
 }
 
 export { DEFAULT_GPU_ATTESTATION_POLICY, type GpuAttestationPolicy };
@@ -213,6 +224,11 @@ export function verifyAttestationBundle(
   }
   if (bundle.vllm.binary_sha256 !== payload.vllm.binary_sha256) {
     return { ok: false, policyId: policy.policyId, reason: "vllm_hash_bundle_mismatch" };
+  }
+
+  const goldenVerdict = verifyGoldenImageClaimsAgainstPolicy(payload.golden, policy.golden);
+  if (!goldenVerdict.ok) {
+    return { ok: false, policyId: policy.policyId, reason: goldenVerdict.reason };
   }
 
   let gpuResult;

@@ -2,9 +2,13 @@ import { readFileSync } from "node:fs";
 
 import type { AttestationPolicy } from "./attestation.js";
 import { DEFAULT_GPU_ATTESTATION_POLICY } from "./nv-cc/types.js";
+import {
+  parseGoldenAttestationPolicyFromJson,
+  type GoldenAttestationPolicyFileJson,
+} from "./golden-policy.js";
 
 /** JSON on-disk shape for ops-managed allowlists (pre-rent / production). */
-export interface AttestationPolicyFileJson {
+export interface AttestationPolicyFileJson extends GoldenAttestationPolicyFileJson {
   policyId: string;
   allowedEngineBinarySha256: string[];
   allowedVllmBinarySha256: string[];
@@ -62,6 +66,7 @@ export function parseAttestationPolicyJson(raw: unknown): AttestationPolicy {
     allowedVllmBinarySha256: new Set(assertStringArray(rec.allowedVllmBinarySha256, "vllm")),
     maxQuoteAgeMs: Math.floor(maxQuoteAgeMs),
     gpu: parseGpuPolicy(rec),
+    golden: parseGoldenAttestationPolicyFromJson(rec),
   };
 }
 

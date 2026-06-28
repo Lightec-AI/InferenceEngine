@@ -7,6 +7,7 @@ import {
 } from "./quote.js";
 import { requestSevSnpAttestationReport } from "./guest-report.js";
 import { resolveBinaryMeasurementsFromEnv } from "./measurements.js";
+import { resolveGoldenImageMeasurementsFromEnv } from "../golden-policy.js";
 import { collectNvCcGpuEvidenceB64 } from "../nv-cc/collect.js";
 
 export interface BuildSevSnpAttestationArgs {
@@ -28,6 +29,7 @@ export function buildSevSnpAttestationBundle(args: BuildSevSnpAttestationArgs): 
   const env = args.env ?? process.env;
   const root = args.root ?? process.cwd();
   const measurements = args.measurements ?? resolveBinaryMeasurementsFromEnv(env, root);
+  const golden = resolveGoldenImageMeasurementsFromEnv(env);
   const issuedAt = new Date().toISOString();
   const tlsHash = args.tlsClientCertSha256.toLowerCase();
   const reportData = bindReportData64({
@@ -56,6 +58,7 @@ export function buildSevSnpAttestationBundle(args: BuildSevSnpAttestationArgs): 
       binary_sha256: measurements.vllmBinarySha256,
     },
     issued_at: issuedAt,
+    ...(golden ? { golden } : {}),
   };
 
   const wrapper: SevSnpQuoteWrapper = {
