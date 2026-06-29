@@ -53,7 +53,19 @@ export function installEnginePoolScaleControl(opts: EnginePoolScaleControlOption
     }
   };
 
-  process.on("SIGUSR3" as NodeJS.Signals, () => {
-    void runScale();
-  });
+  // SIGUSR3 is not available on Linux; ops writes the JSON file and we poll it.
+  let watchTimer: ReturnType<typeof setInterval> | null = null;
+  const armFilePoll = (): void => {
+    if (watchTimer) return;
+    watchTimer = setInterval(() => {
+      try {
+        readFileSync(requestFile, "utf8");
+        void runScale();
+      } catch {
+        /* file absent */
+      }
+    }, 2000);
+    watchTimer.unref?.();
+  };
+  armFilePoll();
 }
