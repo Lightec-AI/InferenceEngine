@@ -32,6 +32,13 @@ import {
   type EngineAttestationRefreshContext,
 } from "./attestation-refresh.js";
 import { planGatewayMigration } from "./gateway-migration.js";
+import {
+  initialPoolSessionCount,
+  planPoolDrain,
+  planPoolScale,
+  poolInitialFractionFromEnv,
+} from "./pool-cutover.js";
+import { logEnginePoolScale } from "../ops/engine-events.js";
 
 const RECONNECT_BASE_MS = 1_000;
 const RECONNECT_MAX_MS = 30_000;
@@ -49,6 +56,11 @@ export interface SupervisedEnginePlanePoolOptions extends EnginePlanePoolClientO
   /** Override reconnect attestation refresh (defaults from tlsClientCertSha256). */
   refreshAttestation?: () => AttestationBundle;
   attestationRefresh?: Pick<EngineAttestationRefreshContext, "useSevSnp" | "env" | "root">;
+  /**
+   * Fraction of poolTargetSize to open on boot (default 1). Use 0.5 for green staging slot
+   * during in-place engine blue/green — remainder via scalePool().
+   */
+  poolInitialFraction?: number;
 }
 
 export interface GatewayMigrationResult {
@@ -56,6 +68,22 @@ export interface GatewayMigrationResult {
   onTarget: number;
   onSource: number;
   targetCount: number;
+  blocked: boolean;
+  reason?: string;
+}
+
+export interface PoolDrainResult {
+  drained: number;
+  remaining: number;
+  targetRemaining: number;
+  blocked: boolean;
+  reason?: string;
+}
+
+export interface PoolScaleResult {
+  added: number;
+  total: number;
+  targetSize: number;
   blocked: boolean;
   reason?: string;
 }
@@ -68,6 +96,10 @@ export interface SupervisedEnginePlanePool {
   currentEpoch(): EngineEpoch;
   /** Idle-first make-before-break migration to another gateway engine plane URL. */
   migrateGatewayPool(targetUrl: string, fraction: number): Promise<GatewayMigrationResult>;
+  /** Idle-first disconnect and remove sessions (blue slot during engine blue/green). */
+  drainIdlePool(fraction: number): Promise<PoolDrainResult>;
+  /** Open additional attested sessions up to targetSize (green slot completion). */
+  scalePool(targetSize: number): Promise<PoolScaleResult>;
   close(reason?: AttestedDisconnectRequest["reason"]): Promise<void>;
 }
 
@@ -273,7 +305,39 @@ export async function createSupervisedEnginePlanePool(
     slot.pullWorker = startPullWorker(newSession, sessionId, inference, opts.onError);
   };
 
-  for (let i = 0; i < opts.poolTargetSize; i++) {
+  const drainSlotAt = async (index: number): Promise<void> => {
+    const slot = slots[index];
+    if (!slot) return;
+    if (slot.pullWorker.isBusy()) {
+      throw new Error(`session ${slot.sessionId} busy — cannot drain`);
+    }
+    if (slot.reconnectTimer) {
+      clearTimeout(slot.reconnectTimer);
+      slot.reconnectTimer = null;
+    }
+    slot.pullWorker.stop();
+    slot.session.removeListener("close", slot.onClose);
+    slot.session.removeListener("error", slot.onClose);
+    await gracefulDisconnectAttestedSession(
+      slot.session,
+      slot.sessionId,
+      engineId,
+      "upgrade",
+    ).catch(() => undefined);
+    if (!slot.session.destroyed) slot.session.close();
+    slots.splice(index, 1);
+  };
+
+  const poolInitialFraction =
+    opts.poolInitialFraction ?? poolInitialFractionFromEnv(process.env);
+  const bootSessionCount = initialPoolSessionCount(opts.poolTargetSize, poolInitialFraction);
+  if (bootSessionCount < 1) {
+    throw new Error(
+      `supervised pool requires at least one boot session (poolTargetSize=${opts.poolTargetSize}, poolInitialFraction=${poolInitialFraction})`,
+    );
+  }
+
+  for (let i = 0; i < bootSessionCount; i++) {
     slots.push(await attachSlot(primaryGatewayUrl));
   }
 
@@ -334,6 +398,67 @@ export async function createSupervisedEnginePlanePool(
         targetCount: plan.targetCount,
         blocked: plan.blocked && moved < plan.toMove,
         reason: plan.reason,
+      };
+    },
+    drainIdlePool: async (fraction: number): Promise<PoolDrainResult> => {
+      const idleCount = slots.filter((s) => !s.pullWorker.isBusy()).length;
+      const plan = planPoolDrain({
+        poolTargetSize: opts.poolTargetSize,
+        currentCount: slots.length,
+        fraction,
+        idleCount,
+      });
+
+      let drained = 0;
+      for (let i = 0; i < plan.toDrain; i++) {
+        const index = slots.findIndex((s) => !s.pullWorker.isBusy());
+        if (index < 0) break;
+        await drainSlotAt(index);
+        drained += 1;
+      }
+
+      const remaining = slots.length;
+      return {
+        drained,
+        remaining,
+        targetRemaining: plan.targetRemaining,
+        blocked: plan.blocked || (plan.toDrain > 0 && drained < plan.toDrain),
+        reason: plan.reason,
+      };
+    },
+    scalePool: async (targetSize: number): Promise<PoolScaleResult> => {
+      const plan = planPoolScale({
+        poolTargetSize: opts.poolTargetSize,
+        currentCount: slots.length,
+        targetSize,
+      });
+      if (plan.blocked) {
+        return {
+          added: 0,
+          total: slots.length,
+          targetSize,
+          blocked: true,
+          reason: plan.reason,
+        };
+      }
+
+      let added = 0;
+      for (let i = 0; i < plan.toAdd; i++) {
+        const slot = await attachSlot(primaryGatewayUrl);
+        await registerEpochOnSession(slot.session, slot.sessionId);
+        slots.push(slot);
+        added += 1;
+      }
+
+      if (added > 0) {
+        logEnginePoolScale(engineId, added, slots.length);
+      }
+
+      return {
+        added,
+        total: slots.length,
+        targetSize: plan.targetSize,
+        blocked: false,
       };
     },
     close: async (reason: AttestedDisconnectRequest["reason"] = "shutdown") => {

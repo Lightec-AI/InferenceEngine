@@ -71,6 +71,15 @@ export {
   installGatewayMigrationControl,
   readGatewayMigrationRequestFile,
 } from "./engine/gateway-migration-control.js";
+export * from "./engine/pool-cutover.js";
+export {
+  installEnginePoolDrainControl,
+  readPoolDrainRequestFile,
+} from "./engine/pool-drain-control.js";
+export {
+  installEnginePoolScaleControl,
+  readPoolScaleRequestFile,
+} from "./engine/pool-scale-control.js";
 export * from "./engine/supervised-pool.js";
 export {
   createEngineAttestationRefresher,
@@ -87,6 +96,8 @@ export {
   logEngineEpochRotateFailed,
   logEngineSessionReconnect,
   logEngineShutdown,
+  logEnginePoolDrain,
+  logEnginePoolScale,
   logEngineVllmUpstreamError,
   logEngineWorkAssigned,
 } from "./ops/engine-events.js";

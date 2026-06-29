@@ -78,6 +78,28 @@ export function logEngineSessionReconnect(
   });
 }
 
+export function logEnginePoolDrain(
+  engineId: string,
+  drained: number,
+  remaining: number,
+  blocked: boolean,
+): void {
+  logEvent("info", "inference.engine", "pool_drain", {
+    engineId,
+    drained,
+    remaining,
+    blocked,
+  });
+}
+
+export function logEnginePoolScale(engineId: string, added: number, total: number): void {
+  logEvent("info", "inference.engine", "pool_scale", {
+    engineId,
+    added,
+    total,
+  });
+}
+
 export function logEngineShutdown(engineId: string, buildId?: string): void {
   logEvent("info", "inference.engine", "shutdown", {
     engineId,
