@@ -186,7 +186,7 @@ export async function openPooledConnection(
 const DEFAULT_DISCONNECT_TIMEOUT_MS = 120_000;
 const DEFAULT_DISCONNECT_POLL_MS = 250;
 
-async function gracefulDisconnectSession(
+export async function gracefulDisconnectAttestedSession(
   session: ClientHttp2Session,
   sessionId: string,
   engineId: string,
@@ -223,8 +223,9 @@ export function startPullWorker(
   sessionId: string,
   inference: MockInferenceOptions,
   onError?: (err: Error) => void,
-): () => void {
+): { stop: () => void; isBusy: () => boolean } {
   let closed = false;
+  let busy = false;
 
   const loop = (): void => {
     if (closed || session.closed || session.destroyed) return;
@@ -262,6 +263,7 @@ export function startPullWorker(
 
       void (async () => {
         const startedAt = Date.now();
+        busy = true;
         try {
           const envelope = JSON.parse(Buffer.concat(workChunks).toString("utf8")) as OpeEnvelope;
           let resultStream: import("node:http2").ClientHttp2Stream | undefined;
@@ -340,6 +342,7 @@ export function startPullWorker(
         } catch (e) {
           onError?.(e instanceof Error ? e : new Error(String(e)));
         } finally {
+          busy = false;
           setImmediate(loop);
         }
       })();
@@ -352,8 +355,11 @@ export function startPullWorker(
   };
 
   loop();
-  return () => {
-    closed = true;
+  return {
+    stop: () => {
+      closed = true;
+    },
+    isBusy: () => busy,
   };
 }
 
@@ -364,7 +370,7 @@ export async function createEnginePlanePoolClient(
   configureEventLogFromEnv(process.env);
   const sessionIds: string[] = [];
   const sessions: ClientHttp2Session[] = [];
-  const stopWorkers: Array<() => void> = [];
+  const stopWorkers: Array<{ stop: () => void; isBusy: () => boolean }> = [];
   const inference = opts.inference ?? {};
 
   for (let i = 0; i < opts.poolTargetSize; i++) {
@@ -389,11 +395,11 @@ export async function createEnginePlanePoolClient(
     sessionIds,
     sessions,
     close: async (reason: AttestedDisconnectRequest["reason"] = "shutdown") => {
-      for (const stop of stopWorkers) stop();
+      for (const stop of stopWorkers) stop.stop();
       const engineId = opts.connect.engine_id;
       await Promise.all(
         sessions.map((session, i) =>
-          gracefulDisconnectSession(session, sessionIds[i]!, engineId, reason).catch(() => undefined),
+          gracefulDisconnectAttestedSession(session, sessionIds[i]!, engineId, reason).catch(() => undefined),
         ),
       );
       for (const s of sessions) {
@@ -434,10 +440,10 @@ export async function createEnginePlanePoolClient(
         const session = sessions.pop();
         const sessionId = sessionIds.pop();
         const stop = stopWorkers.pop();
-        stop?.();
+        stop?.stop();
         if (session) {
       if (sessionId) {
-            await gracefulDisconnectSession(
+            await gracefulDisconnectAttestedSession(
               session,
               sessionId,
               opts.connect.engine_id,

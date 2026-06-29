@@ -12,6 +12,7 @@ import {
   openPooledConnection,
   postEphemeralOnAttestedSession,
   startPullWorker,
+  gracefulDisconnectAttestedSession,
   type EnginePlanePoolClientOptions,
 } from "../engine-plane/pool-client.js";
 import type { MockInferenceOptions } from "../engine-plane/inference-handler.js";
@@ -30,6 +31,7 @@ import {
   createEngineAttestationRefresher,
   type EngineAttestationRefreshContext,
 } from "./attestation-refresh.js";
+import { planGatewayMigration } from "./gateway-migration.js";
 
 const RECONNECT_BASE_MS = 1_000;
 const RECONNECT_MAX_MS = 30_000;
@@ -49,19 +51,31 @@ export interface SupervisedEnginePlanePoolOptions extends EnginePlanePoolClientO
   attestationRefresh?: Pick<EngineAttestationRefreshContext, "useSevSnp" | "env" | "root">;
 }
 
+export interface GatewayMigrationResult {
+  moved: number;
+  onTarget: number;
+  onSource: number;
+  targetCount: number;
+  blocked: boolean;
+  reason?: string;
+}
+
 export interface SupervisedEnginePlanePool {
   sessionIds: string[];
   sessions: ClientHttp2Session[];
   decryptor: RotatingEpochDecryptor;
   rotator: EpochRotator;
   currentEpoch(): EngineEpoch;
+  /** Idle-first make-before-break migration to another gateway engine plane URL. */
+  migrateGatewayPool(targetUrl: string, fraction: number): Promise<GatewayMigrationResult>;
   close(reason?: AttestedDisconnectRequest["reason"]): Promise<void>;
 }
 
 interface SessionSlot {
   sessionId: string;
   session: ClientHttp2Session;
-  stopWorker: () => void;
+  gatewayBaseUrl: string;
+  pullWorker: { stop: () => void; isBusy: () => boolean };
   reconnectTimer: ReturnType<typeof setTimeout> | null;
   reconnectAttempt: number;
   onClose: () => void;
@@ -82,6 +96,7 @@ export async function createSupervisedEnginePlanePool(
   }
 
   const engineId = opts.connect.engine_id;
+  const primaryGatewayUrl = opts.gatewayBaseUrl;
   const policy = epochRotationPolicyFromEnv();
   const slots: SessionSlot[] = [];
   let closed = false;
@@ -126,8 +141,9 @@ export async function createSupervisedEnginePlanePool(
     rotator.setAttestation(fresh);
   };
 
-  const poolConnectOpts = (): EnginePlanePoolClientOptions => ({
+  const poolConnectOpts = (gatewayBaseUrl: string = primaryGatewayUrl): EnginePlanePoolClientOptions => ({
     ...opts,
+    gatewayBaseUrl,
     connect,
   });
 
@@ -174,22 +190,22 @@ export async function createSupervisedEnginePlanePool(
     slot.reconnectAttempt += 1;
     logEngineSessionReconnect(engineId, slot.sessionId, slot.reconnectAttempt);
     try {
-      slot.stopWorker();
+      slot.pullWorker.stop();
       if (!slot.session.destroyed) slot.session.close();
       const sessionId = randomUUID();
       applyFreshAttestation();
-      const session = await openPooledConnection(poolConnectOpts(), sessionId);
+      const session = await openPooledConnection(poolConnectOpts(slot.gatewayBaseUrl), sessionId);
       slot.sessionId = sessionId;
       slot.session = session;
       slot.reconnectAttempt = 0;
       bindSessionClose(slot);
       await registerEpochOnSession(session, sessionId);
-      slot.stopWorker = startPullWorker(session, sessionId, inference, opts.onError);
+      slot.pullWorker = startPullWorker(session, sessionId, inference, opts.onError);
       supervisor.markHealthy();
     } catch (e) {
       logEnginePoolConnectFailed(
         engineId,
-        opts.gatewayBaseUrl,
+        slot.gatewayBaseUrl,
         e instanceof Error ? e.message : String(e),
       );
       supervisor.markUnhealthy();
@@ -209,19 +225,56 @@ export async function createSupervisedEnginePlanePool(
     slot.session.on("error", slot.onClose);
   };
 
-  for (let i = 0; i < opts.poolTargetSize; i++) {
+  const attachSlot = async (
+    gatewayBaseUrl: string,
+  ): Promise<SessionSlot> => {
     const sessionId = randomUUID();
-    const session = await openPooledConnection(poolConnectOpts(), sessionId);
+    const session = await openPooledConnection(poolConnectOpts(gatewayBaseUrl), sessionId);
     const slot: SessionSlot = {
       sessionId,
       session,
-      stopWorker: startPullWorker(session, sessionId, inference, opts.onError),
+      gatewayBaseUrl,
+      pullWorker: startPullWorker(session, sessionId, inference, opts.onError),
       reconnectTimer: null,
       reconnectAttempt: 0,
       onClose: () => undefined,
     };
     bindSessionClose(slot);
-    slots.push(slot);
+    return slot;
+  };
+
+  const migrateOneSession = async (slot: SessionSlot, targetUrl: string): Promise<void> => {
+    if (slot.pullWorker.isBusy()) {
+      throw new Error(`session ${slot.sessionId} busy — cannot migrate`);
+    }
+    if (slot.gatewayBaseUrl === targetUrl) return;
+
+    const sessionId = randomUUID();
+    applyFreshAttestation();
+    const newSession = await openPooledConnection(poolConnectOpts(targetUrl), sessionId);
+
+    slot.pullWorker.stop();
+    slot.session.removeListener("close", slot.onClose);
+    slot.session.removeListener("error", slot.onClose);
+    await gracefulDisconnectAttestedSession(
+      slot.session,
+      slot.sessionId,
+      engineId,
+      "upgrade",
+    ).catch(() => undefined);
+    if (!slot.session.destroyed) slot.session.close();
+
+    slot.sessionId = sessionId;
+    slot.session = newSession;
+    slot.gatewayBaseUrl = targetUrl;
+    slot.reconnectAttempt = 0;
+    bindSessionClose(slot);
+    await registerEpochOnSession(newSession, sessionId);
+    slot.pullWorker = startPullWorker(newSession, sessionId, inference, opts.onError);
+  };
+
+  for (let i = 0; i < opts.poolTargetSize; i++) {
+    slots.push(await attachSlot(primaryGatewayUrl));
   }
 
   await rotator.registerInitialEpoch();
@@ -251,6 +304,38 @@ export async function createSupervisedEnginePlanePool(
     decryptor,
     rotator,
     currentEpoch: () => rotator.currentEpoch(),
+    migrateGatewayPool: async (targetUrl: string, fraction: number): Promise<GatewayMigrationResult> => {
+      const normalized = targetUrl.trim();
+      const onTarget = slots.filter((s) => s.gatewayBaseUrl === normalized).length;
+      const sourceSlots = slots.filter((s) => s.gatewayBaseUrl !== normalized);
+      const idleOnSource = sourceSlots.filter((s) => !s.pullWorker.isBusy()).length;
+      const plan = planGatewayMigration({
+        poolSize: slots.length,
+        onTarget,
+        fraction,
+        idleOnSource,
+      });
+
+      let moved = 0;
+      for (let i = 0; i < plan.toMove; i++) {
+        const candidate = slots.find(
+          (s) => s.gatewayBaseUrl !== normalized && !s.pullWorker.isBusy(),
+        );
+        if (!candidate) break;
+        await migrateOneSession(candidate, normalized);
+        moved += 1;
+      }
+
+      const finalOnTarget = slots.filter((s) => s.gatewayBaseUrl === normalized).length;
+      return {
+        moved,
+        onTarget: finalOnTarget,
+        onSource: slots.length - finalOnTarget,
+        targetCount: plan.targetCount,
+        blocked: plan.blocked && moved < plan.toMove,
+        reason: plan.reason,
+      };
+    },
     close: async (reason: AttestedDisconnectRequest["reason"] = "shutdown") => {
       closed = true;
       rotator.stop();
@@ -259,7 +344,7 @@ export async function createSupervisedEnginePlanePool(
       supervisor.markUnhealthy();
       for (const slot of slots) {
         if (slot.reconnectTimer) clearTimeout(slot.reconnectTimer);
-        slot.stopWorker();
+        slot.pullWorker.stop();
         slot.session.removeListener("close", slot.onClose);
         slot.session.removeListener("error", slot.onClose);
       }

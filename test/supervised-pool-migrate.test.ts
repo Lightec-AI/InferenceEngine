@@ -2,7 +2,6 @@ import type { ClientHttp2Session } from "node:http2";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { parseMockCpuQuote } from "../src/attestation.js";
 import { createMockProvider } from "../src/crypto/provider.js";
 import { createSupervisedEnginePlanePool } from "../src/engine/supervised-pool.js";
 import { buildAttestedConnectRequest, generateMockEngineKeys } from "../src/testing/mock-keys.js";
@@ -31,34 +30,35 @@ function fakeSession(): ClientHttp2Session {
   } as unknown as ClientHttp2Session;
 }
 
-describe("supervised pool reconnect attestation", () => {
+describe("supervised pool gateway migration", () => {
   afterEach(() => {
     vi.restoreAllMocks();
-    vi.useRealTimers();
   });
 
-  it("refreshes attestation before reconnect connect", async () => {
-    vi.useFakeTimers();
-
+  it("migrates idle sessions make-before-break", async () => {
     const material = generateMockEngineKeys({
-      engineId: "eng-reconnect",
+      engineId: "eng-migrate",
       models: ["m@teechat"],
     });
     const provider = createMockProvider();
     const poolClient = await import("../src/engine-plane/pool-client.js");
-    const connectBodies: Array<{ attestation: { cpu_tee: { quote: string } } }> = [];
+    const connectUrls: string[] = [];
     let connectCount = 0;
 
     vi.spyOn(poolClient, "openPooledConnection").mockImplementation(async (opts) => {
       connectCount += 1;
-      connectBodies.push(opts.connect as typeof connectBodies[number]);
+      connectUrls.push(opts.gatewayBaseUrl);
       return fakeSession();
     });
     vi.spyOn(poolClient, "postEphemeralOnAttestedSession").mockResolvedValue({
       status: 201,
       json: {},
     });
-    vi.spyOn(poolClient, "startPullWorker").mockReturnValue({ stop: () => undefined, isBusy: () => false });
+    vi.spyOn(poolClient, "gracefulDisconnectAttestedSession").mockResolvedValue(undefined);
+    vi.spyOn(poolClient, "startPullWorker").mockReturnValue({
+      stop: () => undefined,
+      isBusy: () => false,
+    });
 
     const pool = await createSupervisedEnginePlanePool({
       gatewayBaseUrl: "https://127.0.0.1:8788",
@@ -71,9 +71,9 @@ describe("supervised pool reconnect attestation", () => {
       connect: buildAttestedConnectRequest({
         material,
         sessionId: "boot-session",
-        poolTargetSize: 1,
+        poolTargetSize: 2,
       }),
-      poolTargetSize: 1,
+      poolTargetSize: 2,
       ed25519PublicB64: material.ed25519Public,
       ed25519PrivateKey: material.ed25519PrivateKey,
       attestation: material.registerRequest.attestation,
@@ -82,15 +82,15 @@ describe("supervised pool reconnect attestation", () => {
       provider,
     });
 
-    expect(connectCount).toBe(1);
-    pool.sessions[0]!.close();
-
-    await vi.advanceTimersByTimeAsync(1_500);
-
     expect(connectCount).toBe(2);
-    const bootClaims = parseMockCpuQuote(connectBodies[0]!.attestation.cpu_tee.quote);
-    const reconnectClaims = parseMockCpuQuote(connectBodies[1]!.attestation.cpu_tee.quote);
-    expect(reconnectClaims?.issued_at).not.toBe(bootClaims?.issued_at);
+    expect(connectUrls.every((u) => u === "https://127.0.0.1:8788")).toBe(true);
+
+    const result = await pool.migrateGatewayPool("https://127.0.0.1:8790", 0.5);
+    expect(result.moved).toBe(1);
+    expect(result.onTarget).toBe(1);
+    expect(result.onSource).toBe(1);
+    expect(connectUrls).toContain("https://127.0.0.1:8790");
+    expect(poolClient.gracefulDisconnectAttestedSession).toHaveBeenCalled();
 
     await pool.close();
   });

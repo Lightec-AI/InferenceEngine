@@ -66,6 +66,11 @@ export * from "./engine/epoch-rotation-policy.js";
 export * from "./engine/epoch-rotator.js";
 export * from "./engine/rotating-decryptor.js";
 export * from "./engine/decrypt-handle.js";
+export * from "./engine/gateway-migration.js";
+export {
+  installGatewayMigrationControl,
+  readGatewayMigrationRequestFile,
+} from "./engine/gateway-migration-control.js";
 export * from "./engine/supervised-pool.js";
 export {
   createEngineAttestationRefresher,
