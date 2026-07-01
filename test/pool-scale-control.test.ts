@@ -26,7 +26,8 @@ describe("pool scale control", () => {
     expect(readPoolScaleRequestFile(path).target_size).toBe(2);
   });
 
-  it("runs scale on SIGUSR3", async () => {
+  it("runs scale when the request file is polled", async () => {
+    vi.useFakeTimers();
     const dir = mkdtempSync(join(tmpdir(), "pool-scale-"));
     const path = join(dir, "req.json");
     writeFileSync(path, '{"target_size":2}');
@@ -44,8 +45,8 @@ describe("pool scale control", () => {
       requestFile: path,
     });
 
-    process.emit("SIGUSR3" as NodeJS.Signals);
-    await new Promise((r) => setTimeout(r, 20));
+    await vi.advanceTimersByTimeAsync(2000);
     expect(scale).toHaveBeenCalledWith(2);
+    vi.useRealTimers();
   });
 });
