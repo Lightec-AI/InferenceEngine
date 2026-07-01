@@ -70,11 +70,16 @@ export function logEngineSessionReconnect(
   engineId: string,
   sessionId: string,
   attempt: number,
+  opts?: { gracefulDisconnect?: boolean },
 ): void {
   logEvent("info", "inference.engine", "pool_session_reconnect", {
     engineId,
     sessionId,
     attempt,
+    keptSessionId: true,
+    ...(opts?.gracefulDisconnect !== undefined
+      ? { gracefulDisconnect: opts.gracefulDisconnect }
+      : {}),
   });
 }
 

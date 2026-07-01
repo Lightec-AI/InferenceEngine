@@ -219,22 +219,34 @@ export async function createSupervisedEnginePlanePool(
 
   const reconnectSlot = async (slot: SessionSlot): Promise<void> => {
     if (closed) return;
+    const sessionId = slot.sessionId;
     slot.reconnectAttempt += 1;
-    logEngineSessionReconnect(engineId, slot.sessionId, slot.reconnectAttempt);
+    const attempt = slot.reconnectAttempt;
+    let gracefulDisconnect = false;
     try {
       slot.pullWorker.stop();
+      slot.session.removeListener("close", slot.onClose);
+      slot.session.removeListener("error", slot.onClose);
+      gracefulDisconnect = await gracefulDisconnectAttestedSession(
+        slot.session,
+        sessionId,
+        engineId,
+        "admin",
+      )
+        .then(() => true)
+        .catch(() => false);
       if (!slot.session.destroyed) slot.session.close();
-      const sessionId = randomUUID();
       applyFreshAttestation();
       const session = await openPooledConnection(poolConnectOpts(slot.gatewayBaseUrl), sessionId);
-      slot.sessionId = sessionId;
       slot.session = session;
       slot.reconnectAttempt = 0;
       bindSessionClose(slot);
       await registerEpochOnSession(session, sessionId);
       slot.pullWorker = startPullWorker(session, sessionId, inference, opts.onError);
       supervisor.markHealthy();
+      logEngineSessionReconnect(engineId, sessionId, attempt, { gracefulDisconnect });
     } catch (e) {
+      logEngineSessionReconnect(engineId, sessionId, attempt, { gracefulDisconnect });
       logEnginePoolConnectFailed(
         engineId,
         slot.gatewayBaseUrl,
