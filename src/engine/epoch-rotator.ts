@@ -94,13 +94,18 @@ export function createEpochRotator(opts: EpochRotatorOptions): EpochRotator {
     if (!sessions.length) {
       throw new Error("no live attested sessions for ephemeral register");
     }
+    const results = await Promise.all(
+      sessions.map(async ({ session, sessionId }) => {
+        const res = await postEphemeralOnAttestedSession({
+          session,
+          sessionId,
+          body: epoch.ephemeralRequest,
+        });
+        return { sessionId, res };
+      }),
+    );
     let lastError: Error | undefined;
-    for (const { session, sessionId } of sessions) {
-      const res = await postEphemeralOnAttestedSession({
-        session,
-        sessionId,
-        body: epoch.ephemeralRequest,
-      });
+    for (const { sessionId, res } of results) {
       if (res.status !== 201) {
         lastError = new Error(`ephemeral register HTTP ${res.status}: ${JSON.stringify(res.json)}`);
         logEngineEpochRotateFailed(opts.engineId, res.status, sessionId);

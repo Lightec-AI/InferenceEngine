@@ -115,3 +115,41 @@ export function poolInitialFractionFromEnv(env: NodeJS.ProcessEnv = process.env)
   if (!Number.isFinite(n) || n < 0 || n > 1) return 1;
   return n;
 }
+
+/**
+ * Max in-flight attested connects during pool boot/scale.
+ * Unset or 0 = open all sessions in parallel (capped by sessionCount).
+ */
+export function poolConnectConcurrencyFromEnv(
+  env: NodeJS.ProcessEnv,
+  sessionCount: number,
+): number {
+  if (sessionCount < 1) return 1;
+  const raw = env.TEECHAT_ENGINE_POOL_CONNECT_CONCURRENCY?.trim();
+  if (!raw || raw === "0") return sessionCount;
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n < 1) return sessionCount;
+  return Math.min(Math.floor(n), sessionCount);
+}
+
+/** Run `count` tasks with at most `concurrency` in flight (preserves result order). */
+export async function mapWithConcurrency<T>(
+  count: number,
+  concurrency: number,
+  fn: (index: number) => Promise<T>,
+): Promise<T[]> {
+  if (count < 1) return [];
+  const limit = Math.max(1, Math.min(concurrency, count));
+  const results: T[] = new Array(count);
+  let next = 0;
+  const workers = Array.from({ length: limit }, async () => {
+    while (true) {
+      const index = next;
+      next += 1;
+      if (index >= count) break;
+      results[index] = await fn(index);
+    }
+  });
+  await Promise.all(workers);
+  return results;
+}

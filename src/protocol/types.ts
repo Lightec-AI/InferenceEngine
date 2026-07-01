@@ -151,12 +151,19 @@ export interface AttestedConnectRequest {
   attestation: AttestationBundle;
   /** Desired pool width reported by engine supervisor. */
   pool_target_size?: number;
+  /**
+   * Engine-issued 128-bit hex challenge; gateway binds into platform quote.
+   * Reused across parallel connects in one boot or scale batch.
+   */
+  gateway_challenge_nonce?: string;
 }
 
 export interface AttestedConnectResponse {
   ok: boolean;
   gateway_attestation?: AttestationBundle;
   pool_target_ack?: number;
+  /** Echo of {@link AttestedConnectRequest.gateway_challenge_nonce} when challenged. */
+  gateway_challenge_nonce?: string;
 }
 
 export interface AttestedPoolResizeRequest {

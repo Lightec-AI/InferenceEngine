@@ -12,6 +12,7 @@ import {
   HEADER_USAGE_REPORT,
   INFERENCE_PATH,
   type AttestedConnectRequest,
+  type AttestedConnectResponse,
   type AttestedDisconnectRequest,
   type AttestedDisconnectResponse,
   type AttestedPoolResizeRequest,
@@ -25,6 +26,7 @@ import {
   type AttestationPolicy,
   type PlatformAttestationPolicy,
 } from "../attestation.js";
+import { verifyGatewayConnectChallengeInBundle } from "../engine/gateway-connect-nonce.js";
 import {
   logEnginePoolConnect,
   logEnginePoolConnectFailed,
@@ -53,6 +55,8 @@ export interface EnginePlanePoolClientOptions {
     skillHubBinarySha256: string;
     gatewayEd25519Public: string;
   };
+  /** 128-bit hex challenge for this connect batch (boot/scale/reconnect). */
+  gatewayChallengeNonce?: string;
 }
 
 export interface EnginePlanePoolClient {
@@ -136,6 +140,9 @@ export async function openPooledConnection(
     ...opts.connect,
     session_id: sessionId,
     pool_target_size: opts.poolTargetSize,
+    ...(opts.gatewayChallengeNonce
+      ? { gateway_challenge_nonce: opts.gatewayChallengeNonce.trim().toLowerCase() }
+      : {}),
   };
 
   const connectRes = await h2RequestJson(session, {
@@ -157,12 +164,19 @@ export async function openPooledConnection(
 
   const verify = opts.gatewayPlatformVerify;
   if (verify) {
-    const body = connectRes.json as {
-      gateway_attestation?: import("../protocol/types.js").AttestationBundle;
-    };
+    const body = connectRes.json as AttestedConnectResponse;
     if (!body.gateway_attestation) {
       session.close();
       throw new Error("gateway_attestation_missing");
+    }
+    if (!opts.gatewayChallengeNonce) {
+      session.close();
+      throw new Error("gateway_challenge_nonce_required");
+    }
+    const expectedNonce = opts.gatewayChallengeNonce.trim().toLowerCase();
+    if ((body.gateway_challenge_nonce ?? "").trim().toLowerCase() !== expectedNonce) {
+      session.close();
+      throw new Error("gateway_challenge_nonce_mismatch");
     }
     const verdict = verifyPlatformAttestationBundle(
       body.gateway_attestation,
@@ -177,6 +191,10 @@ export async function openPooledConnection(
     if (!verdict.ok) {
       session.close();
       throw new Error(`gateway_platform_attestation_failed: ${verdict.reason ?? "unknown"}`);
+    }
+    if (!verifyGatewayConnectChallengeInBundle(body.gateway_attestation, expectedNonce)) {
+      session.close();
+      throw new Error("gateway_challenge_nonce_not_bound");
     }
   }
 

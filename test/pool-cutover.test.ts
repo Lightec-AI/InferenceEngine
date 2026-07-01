@@ -2,10 +2,12 @@ import { describe, expect, it } from "vitest";
 
 import {
   initialPoolSessionCount,
+  mapWithConcurrency,
   parsePoolDrainRequestJson,
   parsePoolScaleRequestJson,
   planPoolDrain,
   planPoolScale,
+  poolConnectConcurrencyFromEnv,
   poolInitialFractionFromEnv,
 } from "../src/engine/pool-cutover.js";
 
@@ -149,5 +151,33 @@ describe("poolInitialFractionFromEnv", () => {
     expect(
       poolInitialFractionFromEnv({ TEECHAT_ENGINE_POOL_INITIAL_FRACTION: "bad" }),
     ).toBe(1);
+  });
+});
+
+describe("poolConnectConcurrencyFromEnv", () => {
+  it("defaults to full parallelism", () => {
+    expect(poolConnectConcurrencyFromEnv({}, 16)).toBe(16);
+    expect(poolConnectConcurrencyFromEnv({ TEECHAT_ENGINE_POOL_CONNECT_CONCURRENCY: "0" }, 8)).toBe(8);
+  });
+
+  it("caps by session count", () => {
+    expect(poolConnectConcurrencyFromEnv({ TEECHAT_ENGINE_POOL_CONNECT_CONCURRENCY: "4" }, 16)).toBe(4);
+    expect(poolConnectConcurrencyFromEnv({ TEECHAT_ENGINE_POOL_CONNECT_CONCURRENCY: "99" }, 3)).toBe(3);
+  });
+});
+
+describe("mapWithConcurrency", () => {
+  it("preserves order and limits in-flight work", async () => {
+    let inFlight = 0;
+    let maxInFlight = 0;
+    const results = await mapWithConcurrency(6, 2, async (index) => {
+      inFlight += 1;
+      maxInFlight = Math.max(maxInFlight, inFlight);
+      await new Promise((r) => setTimeout(r, 5));
+      inFlight -= 1;
+      return index * 2;
+    });
+    expect(results).toEqual([0, 2, 4, 6, 8, 10]);
+    expect(maxInFlight).toBeLessThanOrEqual(2);
   });
 });

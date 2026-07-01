@@ -34,11 +34,14 @@ import {
 import { planGatewayMigration } from "./gateway-migration.js";
 import {
   initialPoolSessionCount,
+  mapWithConcurrency,
   planPoolDrain,
   planPoolScale,
+  poolConnectConcurrencyFromEnv,
   poolInitialFractionFromEnv,
 } from "./pool-cutover.js";
 import { logEnginePoolScale } from "../ops/engine-events.js";
+import { generateGatewayConnectChallengeNonce } from "./gateway-connect-nonce.js";
 
 const RECONNECT_BASE_MS = 1_000;
 const RECONNECT_MAX_MS = 30_000;
@@ -173,11 +176,18 @@ export async function createSupervisedEnginePlanePool(
     rotator.setAttestation(fresh);
   };
 
-  const poolConnectOpts = (gatewayBaseUrl: string = primaryGatewayUrl): EnginePlanePoolClientOptions => ({
+  const poolConnectOpts = (
+    gatewayBaseUrl: string = primaryGatewayUrl,
+    gatewayChallengeNonce?: string,
+  ): EnginePlanePoolClientOptions => ({
     ...opts,
     gatewayBaseUrl,
     connect,
+    gatewayChallengeNonce,
   });
+
+  const connectChallengeForBatch = (): string | undefined =>
+    opts.gatewayPlatformVerify ? generateGatewayConnectChallengeNonce() : undefined;
 
   decryptor = createRotatingEpochDecryptor(rotator.currentEpoch(), policy.overlapGraceMs);
 
@@ -237,7 +247,11 @@ export async function createSupervisedEnginePlanePool(
         .catch(() => false);
       if (!slot.session.destroyed) slot.session.close();
       applyFreshAttestation();
-      const session = await openPooledConnection(poolConnectOpts(slot.gatewayBaseUrl), sessionId);
+      const reconnectChallenge = connectChallengeForBatch();
+      const session = await openPooledConnection(
+        poolConnectOpts(slot.gatewayBaseUrl, reconnectChallenge),
+        sessionId,
+      );
       slot.session = session;
       slot.reconnectAttempt = 0;
       bindSessionClose(slot);
@@ -271,9 +285,13 @@ export async function createSupervisedEnginePlanePool(
 
   const attachSlot = async (
     gatewayBaseUrl: string,
+    gatewayChallengeNonce?: string,
   ): Promise<SessionSlot> => {
     const sessionId = randomUUID();
-    const session = await openPooledConnection(poolConnectOpts(gatewayBaseUrl), sessionId);
+    const session = await openPooledConnection(
+      poolConnectOpts(gatewayBaseUrl, gatewayChallengeNonce),
+      sessionId,
+    );
     const slot: SessionSlot = {
       sessionId,
       session,
@@ -295,7 +313,11 @@ export async function createSupervisedEnginePlanePool(
 
     const sessionId = randomUUID();
     applyFreshAttestation();
-    const newSession = await openPooledConnection(poolConnectOpts(targetUrl), sessionId);
+    const migrateChallenge = connectChallengeForBatch();
+    const newSession = await openPooledConnection(
+      poolConnectOpts(targetUrl, migrateChallenge),
+      sessionId,
+    );
 
     slot.pullWorker.stop();
     slot.session.removeListener("close", slot.onClose);
@@ -349,9 +371,12 @@ export async function createSupervisedEnginePlanePool(
     );
   }
 
-  for (let i = 0; i < bootSessionCount; i++) {
-    slots.push(await attachSlot(primaryGatewayUrl));
-  }
+  const connectConcurrency = poolConnectConcurrencyFromEnv(process.env, bootSessionCount);
+  const bootChallenge = connectChallengeForBatch();
+  const bootSlots = await mapWithConcurrency(bootSessionCount, connectConcurrency, () =>
+    attachSlot(primaryGatewayUrl, bootChallenge),
+  );
+  slots.push(...bootSlots);
 
   await rotator.registerInitialEpoch();
   rotator.start();
@@ -454,13 +479,15 @@ export async function createSupervisedEnginePlanePool(
         };
       }
 
-      let added = 0;
-      for (let i = 0; i < plan.toAdd; i++) {
-        const slot = await attachSlot(primaryGatewayUrl);
+      const scaleConcurrency = poolConnectConcurrencyFromEnv(process.env, plan.toAdd);
+      const scaleChallenge = connectChallengeForBatch();
+      const scaledSlots = await mapWithConcurrency(plan.toAdd, scaleConcurrency, async () => {
+        const slot = await attachSlot(primaryGatewayUrl, scaleChallenge);
         await registerEpochOnSession(slot.session, slot.sessionId);
-        slots.push(slot);
-        added += 1;
-      }
+        return slot;
+      });
+      slots.push(...scaledSlots);
+      const added = scaledSlots.length;
 
       if (added > 0) {
         logEnginePoolScale(engineId, added, slots.length);

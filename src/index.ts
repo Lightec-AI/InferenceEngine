@@ -73,6 +73,12 @@ export {
 } from "./engine/gateway-migration-control.js";
 export * from "./engine/pool-cutover.js";
 export {
+  generateGatewayConnectChallengeNonce,
+  isValidGatewayConnectChallengeNonce,
+  normalizeGatewayConnectChallengeNonce,
+  verifyGatewayConnectChallengeInBundle,
+} from "./engine/gateway-connect-nonce.js";
+export {
   installEnginePoolDrainControl,
   readPoolDrainRequestFile,
 } from "./engine/pool-drain-control.js";
