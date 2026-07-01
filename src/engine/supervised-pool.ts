@@ -47,6 +47,30 @@ const RECONNECT_BASE_MS = 1_000;
 const RECONNECT_MAX_MS = 30_000;
 const PRUNE_INTERVAL_MS = 60_000;
 
+function poolReconnectCoordinationFromEnv(env: NodeJS.ProcessEnv = process.env): {
+  failThreshold: number;
+  failWindowMs: number;
+  circuitMs: number;
+} {
+  const failThreshold = Math.max(
+    1,
+    Math.floor(Number(env.TEECHAT_ENGINE_POOL_RECONNECT_FAIL_THRESHOLD ?? "8") || 8),
+  );
+  const failWindowMs = Math.max(
+    1_000,
+    Math.floor(Number(env.TEECHAT_ENGINE_POOL_RECONNECT_FAIL_WINDOW_MS ?? "10000") || 10_000),
+  );
+  const circuitMs = Math.max(
+    1_000,
+    Math.floor(Number(env.TEECHAT_ENGINE_POOL_RECONNECT_CIRCUIT_MS ?? "30000") || 30_000),
+  );
+  return { failThreshold, failWindowMs, circuitMs };
+}
+
+function noopPullWorker(): SessionSlot["pullWorker"] {
+  return { stop: () => undefined, isBusy: () => false };
+}
+
 export interface SupervisedEnginePlanePoolOptions extends EnginePlanePoolClientOptions {
   ed25519PublicB64: string;
   ed25519PrivateKey: KeyObject;
@@ -137,6 +161,30 @@ export async function createSupervisedEnginePlanePool(
   let closed = false;
   let pruneTimer: ReturnType<typeof setInterval> | null = null;
   let connect = opts.connect;
+  const reconnectCoord = poolReconnectCoordinationFromEnv();
+  const poolReconnectFailureTimes: number[] = [];
+  let poolReconnectCircuitOpenUntil = 0;
+
+  const recordPoolReconnectFailure = (): void => {
+    const now = Date.now();
+    const cutoff = now - reconnectCoord.failWindowMs;
+    while (poolReconnectFailureTimes.length && poolReconnectFailureTimes[0]! < cutoff) {
+      poolReconnectFailureTimes.shift();
+    }
+    poolReconnectFailureTimes.push(now);
+    if (poolReconnectFailureTimes.length >= reconnectCoord.failThreshold) {
+      poolReconnectCircuitOpenUntil = now + reconnectCoord.circuitMs;
+      poolReconnectFailureTimes.length = 0;
+    }
+  };
+
+  const clearPoolReconnectCircuit = (): void => {
+    poolReconnectFailureTimes.length = 0;
+    poolReconnectCircuitOpenUntil = 0;
+  };
+
+  const poolReconnectCircuitDelayMs = (now = Date.now()): number =>
+    Math.max(0, poolReconnectCircuitOpenUntil - now);
 
   const refreshAttestation =
     opts.refreshAttestation ??
@@ -220,7 +268,10 @@ export async function createSupervisedEnginePlanePool(
 
   const scheduleReconnect = (slot: SessionSlot): void => {
     if (closed || slot.reconnectTimer) return;
-    const delay = reconnectDelayMs(slot.reconnectAttempt);
+    const delay = Math.max(
+      reconnectDelayMs(slot.reconnectAttempt),
+      poolReconnectCircuitDelayMs(),
+    );
     slot.reconnectTimer = setTimeout(() => {
       slot.reconnectTimer = null;
       void reconnectSlot(slot);
@@ -258,6 +309,7 @@ export async function createSupervisedEnginePlanePool(
       await registerEpochOnSession(session, sessionId);
       slot.pullWorker = startPullWorker(session, sessionId, inference, opts.onError);
       supervisor.markHealthy();
+      clearPoolReconnectCircuit();
       logEngineSessionReconnect(engineId, sessionId, attempt, { gracefulDisconnect });
     } catch (e) {
       logEngineSessionReconnect(engineId, sessionId, attempt, { gracefulDisconnect });
@@ -267,6 +319,7 @@ export async function createSupervisedEnginePlanePool(
         e instanceof Error ? e.message : String(e),
       );
       supervisor.markUnhealthy();
+      recordPoolReconnectFailure();
       scheduleReconnect(slot);
     }
   };
@@ -283,7 +336,7 @@ export async function createSupervisedEnginePlanePool(
     slot.session.on("error", slot.onClose);
   };
 
-  const attachSlot = async (
+  const attachSlotCore = async (
     gatewayBaseUrl: string,
     gatewayChallengeNonce?: string,
   ): Promise<SessionSlot> => {
@@ -296,12 +349,25 @@ export async function createSupervisedEnginePlanePool(
       sessionId,
       session,
       gatewayBaseUrl,
-      pullWorker: startPullWorker(session, sessionId, inference, opts.onError),
+      pullWorker: noopPullWorker(),
       reconnectTimer: null,
       reconnectAttempt: 0,
       onClose: () => undefined,
     };
     bindSessionClose(slot);
+    return slot;
+  };
+
+  const startPullWorkerOnSlot = (slot: SessionSlot): void => {
+    slot.pullWorker = startPullWorker(slot.session, slot.sessionId, inference, opts.onError);
+  };
+
+  const attachSlot = async (
+    gatewayBaseUrl: string,
+    gatewayChallengeNonce?: string,
+  ): Promise<SessionSlot> => {
+    const slot = await attachSlotCore(gatewayBaseUrl, gatewayChallengeNonce);
+    startPullWorkerOnSlot(slot);
     return slot;
   };
 
@@ -374,11 +440,14 @@ export async function createSupervisedEnginePlanePool(
   const connectConcurrency = poolConnectConcurrencyFromEnv(process.env, bootSessionCount);
   const bootChallenge = connectChallengeForBatch();
   const bootSlots = await mapWithConcurrency(bootSessionCount, connectConcurrency, () =>
-    attachSlot(primaryGatewayUrl, bootChallenge),
+    attachSlotCore(primaryGatewayUrl, bootChallenge),
   );
   slots.push(...bootSlots);
 
   await rotator.registerInitialEpoch();
+  for (const slot of slots) {
+    startPullWorkerOnSlot(slot);
+  }
   rotator.start();
   supervisor.markHealthy();
 
@@ -482,8 +551,9 @@ export async function createSupervisedEnginePlanePool(
       const scaleConcurrency = poolConnectConcurrencyFromEnv(process.env, plan.toAdd);
       const scaleChallenge = connectChallengeForBatch();
       const scaledSlots = await mapWithConcurrency(plan.toAdd, scaleConcurrency, async () => {
-        const slot = await attachSlot(primaryGatewayUrl, scaleChallenge);
+        const slot = await attachSlotCore(primaryGatewayUrl, scaleChallenge);
         await registerEpochOnSession(slot.session, slot.sessionId);
+        startPullWorkerOnSlot(slot);
         return slot;
       });
       slots.push(...scaledSlots);

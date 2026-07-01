@@ -105,6 +105,54 @@ describe("supervised pool engine blue/green cutover", () => {
     await pool.close();
   });
 
+  it("registers ephemeral epoch before pull workers on boot", async () => {
+    const poolClient = await import("../src/engine-plane/pool-client.js");
+    const callOrder: string[] = [];
+    vi.spyOn(poolClient, "openPooledConnection").mockImplementation(async () => fakeSession());
+    vi.spyOn(poolClient, "postEphemeralOnAttestedSession").mockImplementation(async () => {
+      callOrder.push("ephemeral");
+      return { status: 201, json: {} };
+    });
+    vi.spyOn(poolClient, "gracefulDisconnectAttestedSession").mockResolvedValue(undefined);
+    vi.spyOn(poolClient, "startPullWorker").mockImplementation(() => {
+      callOrder.push("pull");
+      return { stop: () => undefined, isBusy: () => false };
+    });
+
+    const material = generateMockEngineKeys({
+      engineId: "eng-boot-epoch-order",
+      models: ["m@teechat"],
+    });
+    const pool = await createSupervisedEnginePlanePool({
+      gatewayBaseUrl: "https://127.0.0.1:8788",
+      tls: {
+        caCertPem: "ca",
+        clientCertPem: "cert",
+        clientKeyPem: "key",
+        clientCertSha256: material.tlsClientCertSha256,
+      },
+      connect: buildAttestedConnectRequest({
+        material,
+        sessionId: "boot-session",
+        poolTargetSize: 2,
+      }),
+      poolTargetSize: 2,
+      poolInitialFraction: 1,
+      ed25519PublicB64: material.ed25519Public,
+      ed25519PrivateKey: material.ed25519PrivateKey,
+      attestation: material.registerRequest.attestation,
+      tlsClientCertSha256: material.tlsClientCertSha256,
+      attestationRefresh: { useSevSnp: false },
+      provider: createMockProvider(),
+    });
+
+    const firstPull = callOrder.indexOf("pull");
+    const lastEphemeral = callOrder.lastIndexOf("ephemeral");
+    expect(firstPull).toBeGreaterThanOrEqual(0);
+    expect(lastEphemeral).toBeLessThan(firstPull);
+    await pool.close();
+  });
+
   it("opens boot sessions in parallel by default", async () => {
     const poolClient = await import("../src/engine-plane/pool-client.js");
     let inFlight = 0;
