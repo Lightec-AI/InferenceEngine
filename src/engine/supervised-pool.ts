@@ -362,15 +362,6 @@ export async function createSupervisedEnginePlanePool(
     slot.pullWorker = startPullWorker(slot.session, slot.sessionId, inference, opts.onError);
   };
 
-  const attachSlot = async (
-    gatewayBaseUrl: string,
-    gatewayChallengeNonce?: string,
-  ): Promise<SessionSlot> => {
-    const slot = await attachSlotCore(gatewayBaseUrl, gatewayChallengeNonce);
-    startPullWorkerOnSlot(slot);
-    return slot;
-  };
-
   const migrateOneSession = async (slot: SessionSlot, targetUrl: string): Promise<void> => {
     if (slot.pullWorker.isBusy()) {
       throw new Error(`session ${slot.sessionId} busy — cannot migrate`);
