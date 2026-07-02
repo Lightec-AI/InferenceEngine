@@ -25,12 +25,15 @@ if (!existsSync(resolve(opeDir, "Cargo.toml"))) {
 }
 
 const profile = (process.env.TEECHAT_FFI_PROFILE ?? "release").toLowerCase();
-const args = ["build", "-p", "ope-ffi"];
-if (profile !== "debug") args.push("--release");
+const rustTarget = process.env.TEECHAT_OPE_FFI_TARGET?.trim();
+const cargoArgs = ["build", "-p", "ope-ffi"];
+if (profile !== "debug") cargoArgs.push("--release");
+if (rustTarget) cargoArgs.push("--target", rustTarget);
 
-console.error(`[build-ope-ffi] cargo ${args.join(" ")} (cwd=${opeDir})`);
+const cargoCmd = rustTarget ? ["cargo", "xwin", ...cargoArgs] : ["cargo", ...cargoArgs];
+console.error(`[build-ope-ffi] ${cargoCmd.join(" ")} (cwd=${opeDir})`);
 try {
-  execFileSync("cargo", args, { cwd: opeDir, stdio: "inherit" });
+  execFileSync(cargoCmd[0], cargoCmd.slice(1), { cwd: opeDir, stdio: "inherit" });
 } catch (e) {
   console.error(`[build-ope-ffi] cargo build failed: ${e instanceof Error ? e.message : e}`);
   process.exit(1);
