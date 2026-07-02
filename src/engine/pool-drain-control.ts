@@ -21,11 +21,18 @@ export function readPoolDrainRequestFile(path: string): { fraction: number } {
   return parsePoolDrainRequestJson(raw);
 }
 
+function defaultPoolDrainRequestFile(): string {
+  const fromEnv = process.env.TEECHAT_ENGINE_POOL_DRAIN_FILE?.trim();
+  if (fromEnv) return fromEnv;
+  const slot = process.env.TEECHAT_ENGINE_SLOT?.trim();
+  if (slot === "blue" || slot === "green") {
+    return `/etc/teechat/engine-pool-drain-${slot}.json`;
+  }
+  return "/etc/teechat/engine-pool-drain.json";
+}
+
 export function installEnginePoolDrainControl(opts: EnginePoolDrainControlOptions): void {
-  const requestFile =
-    opts.requestFile?.trim() ||
-    process.env.TEECHAT_ENGINE_POOL_DRAIN_FILE?.trim() ||
-    "/etc/teechat/engine-pool-drain.json";
+  const requestFile = opts.requestFile?.trim() || defaultPoolDrainRequestFile();
 
   let handling = false;
 

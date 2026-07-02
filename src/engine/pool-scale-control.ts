@@ -21,11 +21,18 @@ export function readPoolScaleRequestFile(path: string): { target_size: number } 
   return parsePoolScaleRequestJson(raw);
 }
 
+function defaultPoolScaleRequestFile(): string {
+  const fromEnv = process.env.TEECHAT_ENGINE_POOL_SCALE_FILE?.trim();
+  if (fromEnv) return fromEnv;
+  const slot = process.env.TEECHAT_ENGINE_SLOT?.trim();
+  if (slot === "blue" || slot === "green") {
+    return `/etc/teechat/engine-pool-scale-${slot}.json`;
+  }
+  return "/etc/teechat/engine-pool-scale.json";
+}
+
 export function installEnginePoolScaleControl(opts: EnginePoolScaleControlOptions): void {
-  const requestFile =
-    opts.requestFile?.trim() ||
-    process.env.TEECHAT_ENGINE_POOL_SCALE_FILE?.trim() ||
-    "/etc/teechat/engine-pool-scale.json";
+  const requestFile = opts.requestFile?.trim() || defaultPoolScaleRequestFile();
 
   let handling = false;
 
