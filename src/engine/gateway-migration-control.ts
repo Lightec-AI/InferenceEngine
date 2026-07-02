@@ -9,6 +9,19 @@ import type { SupervisedEnginePlanePool } from "./supervised-pool.js";
 import { parseGatewayMigrationRequestJson } from "./gateway-migration.js";
 import { logEnginePoolConnect } from "../ops/engine-events.js";
 
+const MIGRATION_RETRY_DELAY_MS = 2_000;
+const MIGRATION_RETRY_MAX_MS = 360_000;
+
+function sleepMs(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function migrationTargetReached(
+  result: Awaited<ReturnType<SupervisedEnginePlanePool["migrateGatewayPool"]>>,
+): boolean {
+  return !result.blocked && result.onTarget >= result.targetCount;
+}
+
 export interface GatewayMigrationControlOptions {
   pool: SupervisedEnginePlanePool;
   requestFile?: string;
@@ -37,8 +50,20 @@ export function installGatewayMigrationControl(opts: GatewayMigrationControlOpti
     handling = true;
     try {
       const req = readGatewayMigrationRequestFile(requestFile);
-      const result = await opts.pool.migrateGatewayPool(req.target_url, req.fraction);
       logEnginePoolConnect(opts.engineId, req.target_url, randomUUID());
+      const deadline = Date.now() + MIGRATION_RETRY_MAX_MS;
+      let result = await opts.pool.migrateGatewayPool(req.target_url, req.fraction);
+      while (!migrationTargetReached(result) && Date.now() < deadline) {
+        await sleepMs(MIGRATION_RETRY_DELAY_MS);
+        result = await opts.pool.migrateGatewayPool(req.target_url, req.fraction);
+      }
+      if (!migrationTargetReached(result)) {
+        console.warn(
+          `[engine-gateway-migration] incomplete after ${MIGRATION_RETRY_MAX_MS}ms: ` +
+            `onTarget=${result.onTarget}/${result.targetCount} blocked=${result.blocked}` +
+            (result.reason ? ` reason=${result.reason}` : ""),
+        );
+      }
       opts.onMigrated?.(result);
       try {
         unlinkSync(requestFile);

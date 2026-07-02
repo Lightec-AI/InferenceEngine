@@ -11,6 +11,7 @@ import {
 
 describe("gateway migration control", () => {
   afterEach(() => {
+    process.removeAllListeners("SIGUSR1");
     vi.restoreAllMocks();
   });
 
@@ -44,5 +45,41 @@ describe("gateway migration control", () => {
     process.emit("SIGUSR1" as NodeJS.Signals);
     await new Promise((r) => setTimeout(r, 20));
     expect(migrate).toHaveBeenCalledWith("https://10.0.0.1:8790", 0.5);
+  });
+
+  it("retries migration while blocked until target reached", async () => {
+    vi.useFakeTimers();
+    const dir = mkdtempSync(join(tmpdir(), "gw-mig-"));
+    const path = join(dir, "req.json");
+    writeFileSync(path, '{"target_url":"https://10.0.0.1:8790","fraction":1}');
+
+    const migrate = vi
+      .fn()
+      .mockResolvedValueOnce({
+        moved: 1,
+        onTarget: 1,
+        onSource: 31,
+        targetCount: 32,
+        blocked: true,
+        reason: "insufficient_idle_sessions",
+      })
+      .mockResolvedValueOnce({
+        moved: 31,
+        onTarget: 32,
+        onSource: 0,
+        targetCount: 32,
+        blocked: false,
+      });
+
+    installGatewayMigrationControl({
+      pool: { migrateGatewayPool: migrate } as never,
+      engineId: "eng-1",
+      requestFile: path,
+    });
+
+    process.emit("SIGUSR1" as NodeJS.Signals);
+    await vi.advanceTimersByTimeAsync(2_500);
+    expect(migrate).toHaveBeenCalledTimes(2);
+    vi.useRealTimers();
   });
 });
