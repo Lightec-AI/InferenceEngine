@@ -86,6 +86,14 @@ export {
   installEnginePoolScaleControl,
   readPoolScaleRequestFile,
 } from "./engine/pool-scale-control.js";
+export {
+  installEnginePoolStatusControl,
+  buildPoolStatusSnapshot,
+  writePoolStatusFile,
+  defaultPoolStatusFile,
+  ENGINE_POOL_STATUS_SCHEMA,
+  type EnginePoolStatusSnapshot,
+} from "./engine/pool-status-control.js";
 export * from "./engine/supervised-pool.js";
 export {
   createEngineAttestationRefresher,
