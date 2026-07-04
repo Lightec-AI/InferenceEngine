@@ -23,6 +23,7 @@ import type { MockInferenceDecryptor } from "./mock-inference.js";
 import { logEngineVllmUpstreamError } from "../ops/engine-events.js";
 import { opeInferenceRejectBody, validateOpeInferenceEnvelope } from "./ope-inference-gate.js";
 import { resolveDecryptHandle } from "../engine/decrypt-handle.js";
+import { takeUtf16SafePrefix } from "./ope-chunk-text.js";
 
 export interface OpeInferenceDecryptor extends MockInferenceDecryptor {}
 
@@ -187,8 +188,8 @@ export async function runOpeInferenceOnEnvelope(
       fullText += delta;
       pending += delta;
       while (pending.length >= chunkChars) {
-        const piece = pending.slice(0, chunkChars);
-        pending = pending.slice(chunkChars);
+        const { piece, rest } = takeUtf16SafePrefix(pending, chunkChars);
+        pending = rest;
         emitEncryptedPiece(piece, false);
       }
     }
