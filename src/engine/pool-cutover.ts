@@ -116,20 +116,102 @@ export function poolInitialFractionFromEnv(env: NodeJS.ProcessEnv = process.env)
   return n;
 }
 
+/** Default max in-flight attested connects (boot / scale / migrate / reconnect). */
+export const DEFAULT_POOL_CONNECT_CONCURRENCY = 2;
+
+/** Default delay between starting new attested connects (ms). */
+export const DEFAULT_POOL_CONNECT_STAGGER_MS = 150;
+
 /**
- * Max in-flight attested connects during pool boot/scale.
- * Unset or 0 = open all sessions in parallel (capped by sessionCount).
+ * Max in-flight attested connects during pool boot/scale/migrate/reconnect.
+ * Unset → {@link DEFAULT_POOL_CONNECT_CONCURRENCY} (avoids gateway event-loop starvation).
+ * `0` or `unlimited` → open up to sessionCount in parallel (break-glass).
  */
 export function poolConnectConcurrencyFromEnv(
   env: NodeJS.ProcessEnv,
   sessionCount: number,
 ): number {
   if (sessionCount < 1) return 1;
-  const raw = env.TEECHAT_ENGINE_POOL_CONNECT_CONCURRENCY?.trim();
-  if (!raw || raw === "0") return sessionCount;
+  const raw = env.TEECHAT_ENGINE_POOL_CONNECT_CONCURRENCY?.trim().toLowerCase();
+  if (raw === "0" || raw === "unlimited") return sessionCount;
+  if (!raw) return Math.min(DEFAULT_POOL_CONNECT_CONCURRENCY, sessionCount);
   const n = Number(raw);
-  if (!Number.isFinite(n) || n < 1) return sessionCount;
+  if (!Number.isFinite(n) || n < 1) return Math.min(DEFAULT_POOL_CONNECT_CONCURRENCY, sessionCount);
   return Math.min(Math.floor(n), sessionCount);
+}
+
+/**
+ * Minimum spacing between *starting* new attested connects (ms).
+ * Unset → {@link DEFAULT_POOL_CONNECT_STAGGER_MS}. `0` disables.
+ */
+export function poolConnectStaggerMsFromEnv(env: NodeJS.ProcessEnv = process.env): number {
+  const raw = env.TEECHAT_ENGINE_POOL_CONNECT_STAGGER_MS?.trim();
+  if (!raw) return DEFAULT_POOL_CONNECT_STAGGER_MS;
+  if (raw === "0") return 0;
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n < 0) return DEFAULT_POOL_CONNECT_STAGGER_MS;
+  return Math.floor(n);
+}
+
+function sleepMs(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * Limits concurrent attested connects and spaces start times.
+ * Shared across boot, scale, migrate, and reconnect so a burst cannot wedge the gateway.
+ */
+export class PoolConnectThrottle {
+  private inFlight = 0;
+  private readonly waiters: Array<() => void> = [];
+  private nextStartAt = 0;
+
+  constructor(
+    readonly concurrency: number,
+    readonly staggerMs: number,
+  ) {}
+
+  async run<T>(fn: () => Promise<T>): Promise<T> {
+    await this.acquire();
+    try {
+      const now = Date.now();
+      const wait = Math.max(0, this.nextStartAt - now);
+      this.nextStartAt = Math.max(this.nextStartAt, now) + this.staggerMs;
+      if (wait > 0) await sleepMs(wait);
+      return await fn();
+    } finally {
+      this.release();
+    }
+  }
+
+  private acquire(): Promise<void> {
+    if (this.inFlight < this.concurrency) {
+      this.inFlight += 1;
+      return Promise.resolve();
+    }
+    return new Promise((resolve) => {
+      this.waiters.push(() => {
+        this.inFlight += 1;
+        resolve();
+      });
+    });
+  }
+
+  private release(): void {
+    this.inFlight -= 1;
+    const next = this.waiters.shift();
+    if (next) next();
+  }
+}
+
+export function createPoolConnectThrottleFromEnv(
+  env: NodeJS.ProcessEnv = process.env,
+  sessionCountHint = 32,
+): PoolConnectThrottle {
+  return new PoolConnectThrottle(
+    poolConnectConcurrencyFromEnv(env, sessionCountHint),
+    poolConnectStaggerMsFromEnv(env),
+  );
 }
 
 /** Run `count` tasks with at most `concurrency` in flight (preserves result order). */

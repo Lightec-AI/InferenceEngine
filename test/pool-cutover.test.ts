@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  PoolConnectThrottle,
   initialPoolSessionCount,
   mapWithConcurrency,
   parsePoolDrainRequestJson,
@@ -8,6 +9,7 @@ import {
   planPoolDrain,
   planPoolScale,
   poolConnectConcurrencyFromEnv,
+  poolConnectStaggerMsFromEnv,
   poolInitialFractionFromEnv,
 } from "../src/engine/pool-cutover.js";
 
@@ -155,14 +157,54 @@ describe("poolInitialFractionFromEnv", () => {
 });
 
 describe("poolConnectConcurrencyFromEnv", () => {
-  it("defaults to full parallelism", () => {
-    expect(poolConnectConcurrencyFromEnv({}, 16)).toBe(16);
+  it("defaults to throttled concurrency (not full parallel)", () => {
+    expect(poolConnectConcurrencyFromEnv({}, 16)).toBe(2);
+    expect(poolConnectConcurrencyFromEnv({}, 1)).toBe(1);
+  });
+
+  it("allows unlimited via 0 or unlimited", () => {
     expect(poolConnectConcurrencyFromEnv({ TEECHAT_ENGINE_POOL_CONNECT_CONCURRENCY: "0" }, 8)).toBe(8);
+    expect(
+      poolConnectConcurrencyFromEnv({ TEECHAT_ENGINE_POOL_CONNECT_CONCURRENCY: "unlimited" }, 8),
+    ).toBe(8);
   });
 
   it("caps by session count", () => {
     expect(poolConnectConcurrencyFromEnv({ TEECHAT_ENGINE_POOL_CONNECT_CONCURRENCY: "4" }, 16)).toBe(4);
     expect(poolConnectConcurrencyFromEnv({ TEECHAT_ENGINE_POOL_CONNECT_CONCURRENCY: "99" }, 3)).toBe(3);
+  });
+});
+
+describe("poolConnectStaggerMsFromEnv", () => {
+  it("defaults to a positive stagger", () => {
+    expect(poolConnectStaggerMsFromEnv({})).toBeGreaterThan(0);
+    expect(poolConnectStaggerMsFromEnv({ TEECHAT_ENGINE_POOL_CONNECT_STAGGER_MS: "0" })).toBe(0);
+    expect(poolConnectStaggerMsFromEnv({ TEECHAT_ENGINE_POOL_CONNECT_STAGGER_MS: "250" })).toBe(250);
+  });
+});
+
+describe("PoolConnectThrottle", () => {
+  it("limits in-flight work and spaces starts", async () => {
+    const throttle = new PoolConnectThrottle(2, 20);
+    let inFlight = 0;
+    let maxInFlight = 0;
+    const starts: number[] = [];
+    const t0 = Date.now();
+    await Promise.all(
+      Array.from({ length: 4 }, () =>
+        throttle.run(async () => {
+          starts.push(Date.now() - t0);
+          inFlight += 1;
+          maxInFlight = Math.max(maxInFlight, inFlight);
+          await new Promise((r) => setTimeout(r, 30));
+          inFlight -= 1;
+        }),
+      ),
+    );
+    expect(maxInFlight).toBeLessThanOrEqual(2);
+    expect(starts.length).toBe(4);
+    // Starts should not all cluster at t=0 when stagger is enabled.
+    expect(Math.max(...starts) - Math.min(...starts)).toBeGreaterThanOrEqual(15);
   });
 });
 

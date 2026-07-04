@@ -33,6 +33,7 @@ import {
 } from "./attestation-refresh.js";
 import { planGatewayMigration } from "./gateway-migration.js";
 import {
+  createPoolConnectThrottleFromEnv,
   initialPoolSessionCount,
   mapWithConcurrency,
   planPoolDrain,
@@ -164,6 +165,15 @@ export async function createSupervisedEnginePlanePool(
   const reconnectCoord = poolReconnectCoordinationFromEnv();
   const poolReconnectFailureTimes: number[] = [];
   let poolReconnectCircuitOpenUntil = 0;
+  /** Shared across boot / scale / migrate / reconnect — prevents gateway TLS/event-loop storms. */
+  const connectThrottle = createPoolConnectThrottleFromEnv(
+    process.env,
+    opts.poolTargetSize,
+  );
+  const openConnection = (
+    ...args: Parameters<typeof openPooledConnection>
+  ): ReturnType<typeof openPooledConnection> =>
+    connectThrottle.run(() => openPooledConnection(...args));
 
   const recordPoolReconnectFailure = (): void => {
     const now = Date.now();
@@ -299,7 +309,7 @@ export async function createSupervisedEnginePlanePool(
       if (!slot.session.destroyed) slot.session.close();
       applyFreshAttestation();
       const reconnectChallenge = connectChallengeForBatch();
-      const session = await openPooledConnection(
+      const session = await openConnection(
         poolConnectOpts(slot.gatewayBaseUrl, reconnectChallenge),
         sessionId,
       );
@@ -341,7 +351,7 @@ export async function createSupervisedEnginePlanePool(
     gatewayChallengeNonce?: string,
   ): Promise<SessionSlot> => {
     const sessionId = randomUUID();
-    const session = await openPooledConnection(
+    const session = await openConnection(
       poolConnectOpts(gatewayBaseUrl, gatewayChallengeNonce),
       sessionId,
     );
@@ -371,7 +381,7 @@ export async function createSupervisedEnginePlanePool(
     const sessionId = randomUUID();
     applyFreshAttestation();
     const migrateChallenge = connectChallengeForBatch();
-    const newSession = await openPooledConnection(
+    const newSession = await openConnection(
       poolConnectOpts(targetUrl, migrateChallenge),
       sessionId,
     );

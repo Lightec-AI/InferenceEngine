@@ -8,6 +8,7 @@ import { randomUUID } from "node:crypto";
 import type { SupervisedEnginePlanePool } from "./supervised-pool.js";
 import { parseGatewayMigrationRequestJson } from "./gateway-migration.js";
 import { logEnginePoolConnect } from "../ops/engine-events.js";
+import { logEvent } from "../ops/event-log.js";
 
 const MIGRATION_RETRY_DELAY_MS = 2_000;
 const MIGRATION_RETRY_MAX_MS = 360_000;
@@ -58,11 +59,30 @@ export function installGatewayMigrationControl(opts: GatewayMigrationControlOpti
         result = await opts.pool.migrateGatewayPool(req.target_url, req.fraction);
       }
       if (!migrationTargetReached(result)) {
+        logEvent("warn", "inference.engine", "gateway_migration_incomplete", {
+          engineId: opts.engineId,
+          targetUrl: req.target_url,
+          fraction: req.fraction,
+          onTarget: result.onTarget,
+          targetCount: result.targetCount,
+          moved: result.moved,
+          blocked: result.blocked,
+          reason: result.reason ?? null,
+        });
         console.warn(
           `[engine-gateway-migration] incomplete after ${MIGRATION_RETRY_MAX_MS}ms: ` +
             `onTarget=${result.onTarget}/${result.targetCount} blocked=${result.blocked}` +
             (result.reason ? ` reason=${result.reason}` : ""),
         );
+      } else {
+        logEvent("info", "inference.engine", "gateway_migration_complete", {
+          engineId: opts.engineId,
+          targetUrl: req.target_url,
+          fraction: req.fraction,
+          onTarget: result.onTarget,
+          targetCount: result.targetCount,
+          moved: result.moved,
+        });
       }
       opts.onMigrated?.(result);
       try {
