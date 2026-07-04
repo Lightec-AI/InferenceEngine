@@ -94,6 +94,11 @@ export {
   ENGINE_POOL_STATUS_SCHEMA,
   type EnginePoolStatusSnapshot,
 } from "./engine/pool-status-control.js";
+export {
+  DEFAULT_ENGINE_INSTANCE_ID,
+  normalizeEngineInstanceId,
+  engineInstanceIdFromEnv,
+} from "./engine/instance-id.js";
 export * from "./engine/supervised-pool.js";
 export {
   createEngineAttestationRefresher,

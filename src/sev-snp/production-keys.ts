@@ -58,6 +58,7 @@ export function buildSevSnpAttestedConnectRequest(args: {
   material: MockEngineKeyMaterial;
   sessionId: string;
   poolTargetSize?: number;
+  instanceId?: string;
 }): AttestedConnectRequest {
   return {
     session_id: args.sessionId,
@@ -66,6 +67,7 @@ export function buildSevSnpAttestedConnectRequest(args: {
     identity: args.material.registerRequest.identity,
     attestation: args.material.registerRequest.attestation,
     pool_target_size: args.poolTargetSize,
+    ...(args.instanceId ? { instance_id: args.instanceId } : {}),
   };
 }
 

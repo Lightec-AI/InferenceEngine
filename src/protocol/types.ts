@@ -152,6 +152,13 @@ export interface AttestedConnectRequest {
   /** Desired pool width reported by engine supervisor. */
   pool_target_size?: number;
   /**
+   * Blue/green (or other) process instance under the same `engine_id`.
+   * Each instance has its own startup identity; gateway must not overwrite
+   * one instance's identity with another's during cutover overlap.
+   * Omitted → `"default"` (single-process deploys).
+   */
+  instance_id?: string;
+  /**
    * Engine-issued 128-bit hex challenge; gateway binds into platform quote.
    * Reused across parallel connects in one boot or scale batch.
    */

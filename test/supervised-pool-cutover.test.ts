@@ -153,14 +153,14 @@ describe("supervised pool engine blue/green cutover", () => {
     await pool.close();
   });
 
-  it("opens boot sessions in parallel by default", async () => {
+  it("throttles boot sessions by default (concurrency 2)", async () => {
     const poolClient = await import("../src/engine-plane/pool-client.js");
     let inFlight = 0;
     let maxInFlight = 0;
     vi.spyOn(poolClient, "openPooledConnection").mockImplementation(async () => {
       inFlight += 1;
       maxInFlight = Math.max(maxInFlight, inFlight);
-      await new Promise((r) => setTimeout(r, 20));
+      await new Promise((r) => setTimeout(r, 40));
       inFlight -= 1;
       return fakeSession();
     });
@@ -174,6 +174,65 @@ describe("supervised pool engine blue/green cutover", () => {
       isBusy: () => false,
     }));
 
+    const material = generateMockEngineKeys({
+      engineId: "eng-throttled-boot",
+      models: ["m@teechat"],
+    });
+    // Short stagger so concurrency limit is observable (default 150ms > open duration).
+    process.env.TEECHAT_ENGINE_POOL_CONNECT_STAGGER_MS = "5";
+    const pool = await createSupervisedEnginePlanePool({
+      gatewayBaseUrl: "https://127.0.0.1:8788",
+      tls: {
+        caCertPem: "ca",
+        clientCertPem: "cert",
+        clientKeyPem: "key",
+        clientCertSha256: material.tlsClientCertSha256,
+      },
+      connect: buildAttestedConnectRequest({
+        material,
+        sessionId: "boot-session",
+        poolTargetSize: 4,
+      }),
+      poolTargetSize: 4,
+      poolInitialFraction: 1,
+      ed25519PublicB64: material.ed25519Public,
+      ed25519PrivateKey: material.ed25519PrivateKey,
+      attestation: material.registerRequest.attestation,
+      tlsClientCertSha256: material.tlsClientCertSha256,
+      attestationRefresh: { useSevSnp: false },
+      provider: createMockProvider(),
+    });
+
+    expect(pool.sessionIds).toHaveLength(4);
+    expect(maxInFlight).toBeGreaterThan(1);
+    expect(maxInFlight).toBeLessThanOrEqual(2);
+    await pool.close();
+    delete process.env.TEECHAT_ENGINE_POOL_CONNECT_STAGGER_MS;
+  });
+
+  it("allows unlimited boot concurrency when configured", async () => {
+    const poolClient = await import("../src/engine-plane/pool-client.js");
+    let inFlight = 0;
+    let maxInFlight = 0;
+    vi.spyOn(poolClient, "openPooledConnection").mockImplementation(async () => {
+      inFlight += 1;
+      maxInFlight = Math.max(maxInFlight, inFlight);
+      await new Promise((r) => setTimeout(r, 30));
+      inFlight -= 1;
+      return fakeSession();
+    });
+    vi.spyOn(poolClient, "postEphemeralOnAttestedSession").mockResolvedValue({
+      status: 201,
+      json: {},
+    });
+    vi.spyOn(poolClient, "gracefulDisconnectAttestedSession").mockResolvedValue(undefined);
+    vi.spyOn(poolClient, "startPullWorker").mockImplementation(() => ({
+      stop: () => undefined,
+      isBusy: () => false,
+    }));
+
+    process.env.TEECHAT_ENGINE_POOL_CONNECT_CONCURRENCY = "unlimited";
+    process.env.TEECHAT_ENGINE_POOL_CONNECT_STAGGER_MS = "0";
     const material = generateMockEngineKeys({
       engineId: "eng-parallel-boot",
       models: ["m@teechat"],
@@ -204,6 +263,8 @@ describe("supervised pool engine blue/green cutover", () => {
     expect(pool.sessionIds).toHaveLength(4);
     expect(maxInFlight).toBeGreaterThan(1);
     await pool.close();
+    delete process.env.TEECHAT_ENGINE_POOL_CONNECT_CONCURRENCY;
+    delete process.env.TEECHAT_ENGINE_POOL_CONNECT_STAGGER_MS;
   });
 
   it("drains idle sessions for half cutover", async () => {
