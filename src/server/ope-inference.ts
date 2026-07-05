@@ -53,6 +53,8 @@ interface DecryptedChatPayload {
   model?: string;
   messages?: Array<{ role?: string; content?: unknown }>;
   max_tokens?: number;
+  frequency_penalty?: number;
+  presence_penalty?: number;
 }
 
 function tokensFromText(text: string): number {
@@ -183,6 +185,10 @@ export async function runOpeInferenceOnEnvelope(
       model: routed.model,
       messages,
       maxTokens: payloadMaxTokens ?? options.vllm?.maxTokens,
+      frequencyPenalty:
+        typeof payload.frequency_penalty === "number" ? payload.frequency_penalty : undefined,
+      presencePenalty:
+        typeof payload.presence_penalty === "number" ? payload.presence_penalty : undefined,
       finishState,
     })) {
       fullText += delta;

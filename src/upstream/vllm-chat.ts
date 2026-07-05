@@ -29,10 +29,47 @@ export interface VllmStreamOptions {
   messages: VllmChatMessage[];
   apiKey?: string;
   maxTokens?: number;
+  frequencyPenalty?: number;
+  presencePenalty?: number;
+  temperature?: number;
+  topP?: number;
   signal?: AbortSignal;
   fetchImpl?: typeof fetch;
   /** When set, the upstream `finish_reason` is written here (e.g. `length`). */
   finishState?: { reason?: string };
+}
+
+/** Clamp OpenAI-compatible penalty to documented range. */
+export function clampOpenAiPenalty(value: number): number {
+  if (!Number.isFinite(value)) return 0;
+  return Math.min(2, Math.max(0, value));
+}
+
+export function buildVllmChatBody(opts: {
+  model: string;
+  messages: VllmChatMessage[];
+  stream: boolean;
+  maxTokens?: number;
+  frequencyPenalty?: number;
+  presencePenalty?: number;
+  temperature?: number;
+  topP?: number;
+}): Record<string, unknown> {
+  const body: Record<string, unknown> = {
+    model: opts.model,
+    messages: opts.messages,
+    stream: opts.stream,
+    max_tokens: opts.maxTokens ?? maxTokensFromEnv(),
+  };
+  if (opts.frequencyPenalty !== undefined) {
+    body.frequency_penalty = clampOpenAiPenalty(opts.frequencyPenalty);
+  }
+  if (opts.presencePenalty !== undefined) {
+    body.presence_penalty = clampOpenAiPenalty(opts.presencePenalty);
+  }
+  if (opts.temperature !== undefined) body.temperature = opts.temperature;
+  if (opts.topP !== undefined) body.top_p = opts.topP;
+  return body;
 }
 
 function normalizeBaseUrl(baseUrl: string): string {
@@ -76,12 +113,18 @@ export async function* streamVllmChatCompletion(
     method: "POST",
     headers,
     signal: opts.signal,
-    body: JSON.stringify({
-      model: opts.model,
-      messages: opts.messages,
-      stream: true,
-      max_tokens: opts.maxTokens ?? maxTokensFromEnv(),
-    }),
+    body: JSON.stringify(
+      buildVllmChatBody({
+        model: opts.model,
+        messages: opts.messages,
+        stream: true,
+        maxTokens: opts.maxTokens,
+        frequencyPenalty: opts.frequencyPenalty,
+        presencePenalty: opts.presencePenalty,
+        temperature: opts.temperature,
+        topP: opts.topP,
+      }),
+    ),
   });
 
   if (!res.ok) {
@@ -201,13 +244,18 @@ export async function completeVllmChatCompletion(opts: VllmCompleteOptions): Pro
     method: "POST",
     headers,
     signal: opts.signal,
-    body: JSON.stringify({
-      model: opts.model,
-      messages: opts.messages,
-      stream: false,
-      max_tokens: opts.maxTokens ?? maxTokensFromEnv(),
-      ...(opts.temperature !== undefined ? { temperature: opts.temperature } : {}),
-    }),
+    body: JSON.stringify(
+      buildVllmChatBody({
+        model: opts.model,
+        messages: opts.messages,
+        stream: false,
+        maxTokens: opts.maxTokens,
+        frequencyPenalty: opts.frequencyPenalty,
+        presencePenalty: opts.presencePenalty,
+        temperature: opts.temperature,
+        topP: opts.topP,
+      }),
+    ),
   });
 
   if (!res.ok) {
