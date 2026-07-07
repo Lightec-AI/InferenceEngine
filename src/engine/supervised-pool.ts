@@ -116,12 +116,26 @@ export interface PoolScaleResult {
   reason?: string;
 }
 
+export function sessionsByGatewayUrlFromSlots(
+  slots: ReadonlyArray<{ gatewayBaseUrl: string }>,
+): Record<string, number> {
+  const counts: Record<string, number> = {};
+  for (const slot of slots) {
+    const url = slot.gatewayBaseUrl.trim();
+    if (!url) continue;
+    counts[url] = (counts[url] ?? 0) + 1;
+  }
+  return counts;
+}
+
 export interface SupervisedEnginePlanePool {
   sessionIds: string[];
   sessions: ClientHttp2Session[];
   decryptor: RotatingEpochDecryptor;
   rotator: EpochRotator;
   currentEpoch(): EngineEpoch;
+  /** Live pool sessions grouped by gateway engine-plane dial URL (ops cutover drain gate). */
+  sessionsByGatewayUrl(): Record<string, number>;
   /** Idle-first make-before-break migration to another gateway engine plane URL. */
   migrateGatewayPool(targetUrl: string, fraction: number): Promise<GatewayMigrationResult>;
   /** Idle-first disconnect and remove sessions (blue slot during engine blue/green). */
@@ -475,6 +489,7 @@ export async function createSupervisedEnginePlanePool(
     decryptor,
     rotator,
     currentEpoch: () => rotator.currentEpoch(),
+    sessionsByGatewayUrl: () => sessionsByGatewayUrlFromSlots(slots),
     migrateGatewayPool: async (targetUrl: string, fraction: number): Promise<GatewayMigrationResult> => {
       const normalized = targetUrl.trim();
       const onTarget = slots.filter((s) => s.gatewayBaseUrl === normalized).length;
