@@ -64,6 +64,7 @@ export function installGatewayMigrationControl(opts: GatewayMigrationControlOpti
           targetUrl: req.target_url,
           fraction: req.fraction,
           onTarget: result.onTarget,
+          onSource: result.onSource,
           targetCount: result.targetCount,
           moved: result.moved,
           blocked: result.blocked,
@@ -80,6 +81,7 @@ export function installGatewayMigrationControl(opts: GatewayMigrationControlOpti
           targetUrl: req.target_url,
           fraction: req.fraction,
           onTarget: result.onTarget,
+          onSource: result.onSource,
           targetCount: result.targetCount,
           moved: result.moved,
         });
