@@ -30,6 +30,7 @@ import { verifyGatewayConnectChallengeInBundle } from "../engine/gateway-connect
 import {
   logEnginePoolConnect,
   logEnginePoolConnectFailed,
+  logEnginePoolSessionError,
   logEngineWorkAssigned,
 } from "../ops/engine-events.js";
 import { configureEventLogFromEnv } from "../ops/event-log.js";
@@ -199,6 +200,17 @@ export async function openPooledConnection(
   }
 
   return session;
+}
+
+/** Persistent session error listener — parity with supervised pool reconnect path. */
+export function attachPooledSessionErrorListeners(
+  session: ClientHttp2Session,
+  opts: { engineId: string; sessionId: string; onError?: (err: Error) => void },
+): void {
+  session.on("error", (err) => {
+    logEnginePoolSessionError(opts.engineId, opts.sessionId, err);
+    opts.onError?.(err instanceof Error ? err : new Error(String(err)));
+  });
 }
 
 const DEFAULT_DISCONNECT_TIMEOUT_MS = 120_000;
@@ -406,6 +418,11 @@ export async function createEnginePlanePoolClient(
     }
     sessionIds.push(sessionId);
     sessions.push(session);
+    attachPooledSessionErrorListeners(session, {
+      engineId: opts.connect.engine_id,
+      sessionId,
+      onError: opts.onError,
+    });
     stopWorkers.push(startPullWorker(session, sessionId, inference, opts.onError));
   }
 
@@ -438,6 +455,11 @@ export async function createEnginePlanePoolClient(
           );
           sessionIds.push(sessionId);
           sessions.push(session);
+          attachPooledSessionErrorListeners(session, {
+            engineId: opts.connect.engine_id,
+            sessionId,
+            onError: opts.onError,
+          });
           stopWorkers.push(startPullWorker(session, sessionId, inference, opts.onError));
         }
         return;

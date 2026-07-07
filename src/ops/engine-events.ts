@@ -20,6 +20,18 @@ export function logEnginePoolConnectFailed(
   });
 }
 
+export function logEnginePoolSessionError(
+  engineId: string,
+  sessionId: string,
+  err: unknown,
+): void {
+  logEvent("warn", "inference.engine", "pool_session_error", {
+    engineId,
+    sessionId,
+    error: (err instanceof Error ? err.message : String(err)).slice(0, 200),
+  });
+}
+
 export function logEngineWorkAssigned(requestId: string, latencyMs: number): void {
   logEvent("debug", "inference.engine", "work_assigned", {
     requestId,
