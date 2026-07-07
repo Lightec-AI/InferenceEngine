@@ -14,11 +14,13 @@ export interface EnginePoolStatusSnapshot {
   schema: typeof ENGINE_POOL_STATUS_SCHEMA;
   engine_id: string;
   live_sessions: number;
+  /** Gateway engine-plane dial URL → session count (ops finalize drain gate). */
+  sessions_by_gateway_url: Record<string, number>;
   updated_at: string;
 }
 
 export interface EnginePoolStatusControlOptions {
-  pool: Pick<SupervisedEnginePlanePool, "sessionIds">;
+  pool: Pick<SupervisedEnginePlanePool, "sessionIds" | "sessionsByGatewayUrl">;
   engineId: string;
   statusFile?: string;
   /** Default 1000ms. */
@@ -38,12 +40,14 @@ export function defaultPoolStatusFile(): string {
 export function buildPoolStatusSnapshot(
   engineId: string,
   liveSessions: number,
+  sessionsByGatewayUrl: Record<string, number> = {},
   now = new Date(),
 ): EnginePoolStatusSnapshot {
   return {
     schema: ENGINE_POOL_STATUS_SCHEMA,
     engine_id: engineId,
     live_sessions: liveSessions,
+    sessions_by_gateway_url: sessionsByGatewayUrl,
     updated_at: now.toISOString(),
   };
 }
@@ -67,7 +71,11 @@ export function installEnginePoolStatusControl(opts: EnginePoolStatusControlOpti
 
   const publish = (): void => {
     try {
-      const snapshot = buildPoolStatusSnapshot(opts.engineId, opts.pool.sessionIds.length);
+      const snapshot = buildPoolStatusSnapshot(
+        opts.engineId,
+        opts.pool.sessionIds.length,
+        opts.pool.sessionsByGatewayUrl(),
+      );
       writePoolStatusFile(statusFile, snapshot);
     } catch (e) {
       console.error(

@@ -17,11 +17,17 @@ describe("pool status control", () => {
   });
 
   it("builds a status snapshot", () => {
-    const snap = buildPoolStatusSnapshot("eng-1", 16, new Date("2026-07-04T00:00:00.000Z"));
+    const snap = buildPoolStatusSnapshot(
+      "eng-1",
+      16,
+      { "https://10.0.0.1:8788": 8, "https://10.0.0.1:8790": 8 },
+      new Date("2026-07-04T00:00:00.000Z"),
+    );
     expect(snap).toEqual({
       schema: ENGINE_POOL_STATUS_SCHEMA,
       engine_id: "eng-1",
       live_sessions: 16,
+      sessions_by_gateway_url: { "https://10.0.0.1:8788": 8, "https://10.0.0.1:8790": 8 },
       updated_at: "2026-07-04T00:00:00.000Z",
     });
   });
@@ -41,7 +47,10 @@ describe("pool status control", () => {
     const sessionIds = ["a", "b"];
 
     const stop = installEnginePoolStatusControl({
-      pool: { sessionIds },
+      pool: {
+        sessionIds,
+        sessionsByGatewayUrl: () => ({ "https://127.0.0.1:8788": sessionIds.length }),
+      },
       engineId: "eng-1",
       statusFile: path,
       intervalMs: 1000,
