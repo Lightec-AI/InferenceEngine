@@ -55,6 +55,8 @@ interface DecryptedChatPayload {
   max_tokens?: number;
   frequency_penalty?: number;
   presence_penalty?: number;
+  /** Main chat only; task model routes always disable thinking on the engine. */
+  enable_thinking?: boolean;
 }
 
 function tokensFromText(text: string): number {
@@ -178,6 +180,7 @@ export async function runOpeInferenceOnEnvelope(
       { baseUrl: options.vllm.baseUrl, apiKey: options.vllm.apiKey },
       options.taskVllm,
     );
+    const enableThinking = routed.isTaskModel ? false : payload.enable_thinking !== false;
     for await (const delta of streamVllmChatCompletion({
       ...options.vllm,
       baseUrl: routed.baseUrl,
@@ -189,6 +192,7 @@ export async function runOpeInferenceOnEnvelope(
         typeof payload.frequency_penalty === "number" ? payload.frequency_penalty : undefined,
       presencePenalty:
         typeof payload.presence_penalty === "number" ? payload.presence_penalty : undefined,
+      enableThinking,
       finishState,
     })) {
       fullText += delta;

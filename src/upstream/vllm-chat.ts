@@ -33,6 +33,8 @@ export interface VllmStreamOptions {
   presencePenalty?: number;
   temperature?: number;
   topP?: number;
+  /** Gemma 4 chat template thinking; omit to leave vLLM default. Task slot must pass `false`. */
+  enableThinking?: boolean;
   signal?: AbortSignal;
   fetchImpl?: typeof fetch;
   /** When set, the upstream `finish_reason` is written here (e.g. `length`). */
@@ -45,6 +47,31 @@ export function clampOpenAiPenalty(value: number): number {
   return Math.min(2, Math.max(0, value));
 }
 
+/** Gemma 4 vLLM: `enable_thinking` in chat template kwargs (task model must stay false). */
+export function mergeVllmThinkingIntoBody(
+  body: Record<string, unknown>,
+  enableThinking: boolean,
+): Record<string, unknown> {
+  const existingExtra =
+    body.extra_body && typeof body.extra_body === "object"
+      ? (body.extra_body as Record<string, unknown>)
+      : {};
+  const existingKwargs =
+    existingExtra.chat_template_kwargs && typeof existingExtra.chat_template_kwargs === "object"
+      ? (existingExtra.chat_template_kwargs as Record<string, unknown>)
+      : {};
+  return {
+    ...body,
+    extra_body: {
+      ...existingExtra,
+      chat_template_kwargs: {
+        ...existingKwargs,
+        enable_thinking: enableThinking,
+      },
+    },
+  };
+}
+
 export function buildVllmChatBody(opts: {
   model: string;
   messages: VllmChatMessage[];
@@ -54,6 +81,8 @@ export function buildVllmChatBody(opts: {
   presencePenalty?: number;
   temperature?: number;
   topP?: number;
+  /** When set, forwarded as `extra_body.chat_template_kwargs.enable_thinking` (Gemma 4). */
+  enableThinking?: boolean;
 }): Record<string, unknown> {
   const body: Record<string, unknown> = {
     model: opts.model,
@@ -69,6 +98,9 @@ export function buildVllmChatBody(opts: {
   }
   if (opts.temperature !== undefined) body.temperature = opts.temperature;
   if (opts.topP !== undefined) body.top_p = opts.topP;
+  if (opts.enableThinking !== undefined) {
+    return mergeVllmThinkingIntoBody(body, opts.enableThinking);
+  }
   return body;
 }
 
@@ -123,6 +155,7 @@ export async function* streamVllmChatCompletion(
         presencePenalty: opts.presencePenalty,
         temperature: opts.temperature,
         topP: opts.topP,
+        enableThinking: opts.enableThinking,
       }),
     ),
   });
@@ -217,16 +250,17 @@ export function resolveVllmBaseUrlForModel(
   model: string,
   main: { baseUrl: string; apiKey?: string },
   task?: TaskVllmRouting | null,
-): { baseUrl: string; model: string; apiKey?: string } {
+): { baseUrl: string; model: string; apiKey?: string; isTaskModel: boolean } {
   const stripped = stripModelProvider(model);
   if (task && stripModelProvider(task.modelId) === stripped) {
     return {
       baseUrl: task.baseUrl,
       model: stripped,
       apiKey: task.apiKey ?? main.apiKey,
+      isTaskModel: true,
     };
   }
-  return { baseUrl: main.baseUrl, model: stripped, apiKey: main.apiKey };
+  return { baseUrl: main.baseUrl, model: stripped, apiKey: main.apiKey, isTaskModel: false };
 }
 
 export interface VllmCompleteOptions extends Omit<VllmStreamOptions, "finishState"> {
@@ -254,6 +288,7 @@ export async function completeVllmChatCompletion(opts: VllmCompleteOptions): Pro
         presencePenalty: opts.presencePenalty,
         temperature: opts.temperature,
         topP: opts.topP,
+        enableThinking: opts.enableThinking,
       }),
     ),
   });

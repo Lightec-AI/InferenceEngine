@@ -11,6 +11,7 @@ describe("resolveVllmBaseUrlForModel", () => {
     );
     expect(routed.baseUrl).toBe("http://127.0.0.1:8001/v1");
     expect(routed.model).toBe("google/gemma-4-E4B-it");
+    expect(routed.isTaskModel).toBe(true);
   });
 
   it("keeps main chat models on the primary upstream", () => {
@@ -21,5 +22,6 @@ describe("resolveVllmBaseUrlForModel", () => {
     );
     expect(routed.baseUrl).toBe("http://127.0.0.1:8000/v1");
     expect(routed.model).toBe("google/gemma-4-31B-it");
+    expect(routed.isTaskModel).toBe(false);
   });
 });

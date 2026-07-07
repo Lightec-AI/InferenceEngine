@@ -33,4 +33,14 @@ describe("buildVllmChatBody", () => {
     expect(body).not.toHaveProperty("frequency_penalty");
     expect(body).not.toHaveProperty("presence_penalty");
   });
+
+  it("sets enable_thinking via extra_body when requested", () => {
+    const body = buildVllmChatBody({
+      model: "gemma",
+      messages: [{ role: "user", content: "hi" }],
+      stream: false,
+      enableThinking: false,
+    });
+    expect(body.extra_body).toEqual({ chat_template_kwargs: { enable_thinking: false } });
+  });
 });

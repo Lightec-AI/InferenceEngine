@@ -113,6 +113,7 @@ export async function runGatewayPlaneTaskInference(
       apiKey: routed.apiKey,
       maxTokens: taskPayload.max_tokens,
       temperature: taskPayload.temperature,
+      enableThinking: false,
       fetchImpl: vllmEnv?.fetchImpl,
     });
 
