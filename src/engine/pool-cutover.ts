@@ -9,8 +9,17 @@ export interface PoolDrainPlanInput {
   poolTargetSize: number;
   /** Live sessions in this process. */
   currentCount: number;
-  /** Fraction of N to drain this step (0..1). */
-  fraction: number;
+  /**
+   * Fraction of N to drain this step (0..1).
+   * Ignored when `count` is set — fraction-of-N cannot step mid-migrate
+   * (after blue holds below N, fraction=1/N wants targetRemaining=N-1 and drains 0).
+   */
+  fraction?: number;
+  /**
+   * Exact idle sessions to drain this step (paired one-by-one cutover).
+   * Prefer this over `fraction` during gradual migration.
+   */
+  count?: number;
   /** Idle (non-busy) sessions available to drain. */
   idleCount: number;
 }
@@ -36,7 +45,10 @@ export interface PoolScalePlan {
 }
 
 export interface PoolDrainRequest {
-  fraction: number;
+  /** Fraction-of-N drain (legacy half/full). Mutually exclusive with `count`. */
+  fraction?: number;
+  /** Drain exactly this many idle sessions (paired stepper). */
+  count?: number;
 }
 
 export interface PoolScaleRequest {
@@ -51,15 +63,50 @@ export function initialPoolSessionCount(poolTargetSize: number, fraction: number
   return Math.max(1, Math.floor(poolTargetSize * fraction));
 }
 
+/**
+ * Plan an exact idle-session drain (paired one-by-one / batch-K cutover).
+ * Unlike fraction-of-N, this works at any mid-migrate `currentCount`.
+ */
+export function planPoolDrainByCount(input: {
+  currentCount: number;
+  count: number;
+  idleCount: number;
+}): PoolDrainPlan {
+  const { currentCount, count, idleCount } = input;
+  if (currentCount < 1) {
+    return { targetRemaining: 0, toDrain: 0, blocked: false };
+  }
+  if (!Number.isInteger(count) || count < 1) {
+    return {
+      targetRemaining: currentCount,
+      toDrain: 0,
+      blocked: true,
+      reason: "invalid_count",
+    };
+  }
+  const wantDrain = Math.min(count, currentCount);
+  const toDrain = Math.min(wantDrain, idleCount);
+  const blocked = toDrain < wantDrain;
+  return {
+    targetRemaining: currentCount - toDrain,
+    toDrain,
+    blocked,
+    reason: blocked ? "insufficient_idle_sessions" : undefined,
+  };
+}
+
 export function planPoolDrain(input: PoolDrainPlanInput): PoolDrainPlan {
-  const { poolTargetSize, currentCount, fraction, idleCount } = input;
+  const { poolTargetSize, currentCount, fraction, count, idleCount } = input;
+  if (count !== undefined) {
+    return planPoolDrainByCount({ currentCount, count, idleCount });
+  }
   if (currentCount < 1) {
     return { targetRemaining: 0, toDrain: 0, blocked: false };
   }
   if (poolTargetSize < 1) {
     return { targetRemaining: currentCount, toDrain: 0, blocked: true, reason: "pool_size_zero" };
   }
-  if (fraction < 0 || fraction > 1) {
+  if (fraction === undefined || fraction < 0 || fraction > 1) {
     return { targetRemaining: currentCount, toDrain: 0, blocked: true, reason: "invalid_fraction" };
   }
 
@@ -91,7 +138,19 @@ export function planPoolScale(input: PoolScalePlanInput): PoolScalePlan {
 }
 
 export function parsePoolDrainRequestJson(raw: string): PoolDrainRequest {
-  const parsed = JSON.parse(raw) as Partial<PoolDrainRequest>;
+  const parsed = JSON.parse(raw) as Partial<PoolDrainRequest> & { count?: number };
+  const hasCount = parsed.count !== undefined && parsed.count !== null;
+  const hasFraction = parsed.fraction !== undefined && parsed.fraction !== null;
+  if (hasCount) {
+    const count = Number(parsed.count);
+    if (!Number.isInteger(count) || count < 1) {
+      throw new Error("pool drain: count must be a positive integer");
+    }
+    return { count };
+  }
+  if (!hasFraction) {
+    throw new Error("pool drain: require fraction (0..1) or count (>=1)");
+  }
   const fraction = Number(parsed.fraction);
   if (!Number.isFinite(fraction) || fraction < 0 || fraction > 1) {
     throw new Error("pool drain: fraction must be 0..1");

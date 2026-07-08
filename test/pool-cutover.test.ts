@@ -89,6 +89,39 @@ describe("planPoolDrain", () => {
     expect(plan.blocked).toBe(true);
     expect(plan.reason).toBe("invalid_fraction");
   });
+
+  it("drains by count mid-migrate (fraction-of-N would no-op)", () => {
+    // Blue holds 20 of N=32; fraction=1/32 wants remaining=31 → drains 0.
+    const byFraction = planPoolDrain({
+      poolTargetSize: 32,
+      currentCount: 20,
+      fraction: 1 / 32,
+      idleCount: 20,
+    });
+    expect(byFraction.toDrain).toBe(0);
+
+    const byCount = planPoolDrain({
+      poolTargetSize: 32,
+      currentCount: 20,
+      count: 1,
+      idleCount: 20,
+    });
+    expect(byCount.toDrain).toBe(1);
+    expect(byCount.targetRemaining).toBe(19);
+    expect(byCount.blocked).toBe(false);
+  });
+
+  it("blocks count drain when idle insufficient", () => {
+    const plan = planPoolDrain({
+      poolTargetSize: 32,
+      currentCount: 10,
+      count: 2,
+      idleCount: 1,
+    });
+    expect(plan.toDrain).toBe(1);
+    expect(plan.blocked).toBe(true);
+    expect(plan.reason).toBe("insufficient_idle_sessions");
+  });
 });
 
 describe("planPoolScale", () => {
@@ -133,8 +166,24 @@ describe("parsePoolDrainRequestJson", () => {
     expect(parsePoolDrainRequestJson('{"fraction":0.5}').fraction).toBe(0.5);
   });
 
+  it("parses count for paired stepper", () => {
+    expect(parsePoolDrainRequestJson('{"count":1}')).toEqual({ count: 1 });
+  });
+
+  it("prefers count when both present", () => {
+    expect(parsePoolDrainRequestJson('{"count":2,"fraction":0.5}')).toEqual({ count: 2 });
+  });
+
   it("rejects invalid fraction", () => {
     expect(() => parsePoolDrainRequestJson('{"fraction":2}')).toThrow(/fraction/);
+  });
+
+  it("rejects invalid count", () => {
+    expect(() => parsePoolDrainRequestJson('{"count":0}')).toThrow(/count/);
+  });
+
+  it("rejects empty object", () => {
+    expect(() => parsePoolDrainRequestJson("{}")).toThrow(/fraction|count/);
   });
 });
 

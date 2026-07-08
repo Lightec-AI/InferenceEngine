@@ -140,6 +140,11 @@ export interface SupervisedEnginePlanePool {
   migrateGatewayPool(targetUrl: string, fraction: number): Promise<GatewayMigrationResult>;
   /** Idle-first disconnect and remove sessions (blue slot during engine blue/green). */
   drainIdlePool(fraction: number): Promise<PoolDrainResult>;
+  /**
+   * Idle-first disconnect of exactly `count` sessions (paired one-by-one cutover).
+   * Works at any mid-migrate pool size — unlike fraction-of-N drain.
+   */
+  drainIdleSessions(count: number): Promise<PoolDrainResult>;
   /** Open additional attested sessions up to targetSize (green slot completion). */
   scalePool(targetSize: number): Promise<PoolScaleResult>;
   close(reason?: AttestedDisconnectRequest["reason"]): Promise<void>;
@@ -446,20 +451,24 @@ export async function createSupervisedEnginePlanePool(
   const poolInitialFraction =
     opts.poolInitialFraction ?? poolInitialFractionFromEnv(process.env);
   const bootSessionCount = initialPoolSessionCount(opts.poolTargetSize, poolInitialFraction);
-  if (bootSessionCount < 1) {
-    throw new Error(
-      `supervised pool requires at least one boot session (poolTargetSize=${opts.poolTargetSize}, poolInitialFraction=${poolInitialFraction})`,
-    );
+  // pool_initial_fraction=0 is valid for blue/green staging: unit up, 0 sessions until pair-step.
+  if (opts.poolTargetSize < 1) {
+    throw new Error(`supervised pool requires poolTargetSize >= 1 (got ${opts.poolTargetSize})`);
   }
 
-  const connectConcurrency = poolConnectConcurrencyFromEnv(process.env, bootSessionCount);
-  const bootChallenge = connectChallengeForBatch();
-  const bootSlots = await mapWithConcurrency(bootSessionCount, connectConcurrency, () =>
-    attachSlotCore(primaryGatewayUrl, bootChallenge),
-  );
-  slots.push(...bootSlots);
+  if (bootSessionCount >= 1) {
+    const connectConcurrency = poolConnectConcurrencyFromEnv(process.env, bootSessionCount);
+    const bootChallenge = connectChallengeForBatch();
+    const bootSlots = await mapWithConcurrency(bootSessionCount, connectConcurrency, () =>
+      attachSlotCore(primaryGatewayUrl, bootChallenge),
+    );
+    slots.push(...bootSlots);
+  }
 
-  await rotator.registerInitialEpoch();
+  // Zero-boot staging has no sessions yet — epoch lands on first scalePool attach.
+  if (slots.length > 0) {
+    await rotator.registerInitialEpoch();
+  }
   for (const slot of slots) {
     startPullWorkerOnSlot(slot);
   }
@@ -528,6 +537,32 @@ export async function createSupervisedEnginePlanePool(
         poolTargetSize: opts.poolTargetSize,
         currentCount: slots.length,
         fraction,
+        idleCount,
+      });
+
+      let drained = 0;
+      for (let i = 0; i < plan.toDrain; i++) {
+        const index = slots.findIndex((s) => !s.pullWorker.isBusy());
+        if (index < 0) break;
+        await drainSlotAt(index);
+        drained += 1;
+      }
+
+      const remaining = slots.length;
+      return {
+        drained,
+        remaining,
+        targetRemaining: plan.targetRemaining,
+        blocked: plan.blocked || (plan.toDrain > 0 && drained < plan.toDrain),
+        reason: plan.reason,
+      };
+    },
+    drainIdleSessions: async (count: number): Promise<PoolDrainResult> => {
+      const idleCount = slots.filter((s) => !s.pullWorker.isBusy()).length;
+      const plan = planPoolDrain({
+        poolTargetSize: opts.poolTargetSize,
+        currentCount: slots.length,
+        count,
         idleCount,
       });
 

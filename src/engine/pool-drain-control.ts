@@ -1,22 +1,28 @@
 /**
  * Runtime pool drain control — SIGUSR2 + JSON request file (no engine process restart).
  * Used by blue slot during in-place engine blue/green cutover.
+ *
+ * Request file accepts either:
+ *   { "fraction": 0.5 }  — legacy half/full (fraction of fleet N)
+ *   { "count": 1 }       — paired one-by-one / batch-K idle drain
  */
 
 import { readFileSync, unlinkSync } from "node:fs";
 
 import type { SupervisedEnginePlanePool } from "./supervised-pool.js";
-import { parsePoolDrainRequestJson } from "./pool-cutover.js";
+import { parsePoolDrainRequestJson, type PoolDrainRequest } from "./pool-cutover.js";
 import { logEnginePoolDrain } from "../ops/engine-events.js";
 
 export interface EnginePoolDrainControlOptions {
   pool: SupervisedEnginePlanePool;
   engineId: string;
   requestFile?: string;
-  onDrained?: (result: Awaited<ReturnType<SupervisedEnginePlanePool["drainIdlePool"]>>) => void;
+  onDrained?: (
+    result: Awaited<ReturnType<SupervisedEnginePlanePool["drainIdlePool"]>>,
+  ) => void;
 }
 
-export function readPoolDrainRequestFile(path: string): { fraction: number } {
+export function readPoolDrainRequestFile(path: string): PoolDrainRequest {
   const raw = readFileSync(path, "utf8");
   return parsePoolDrainRequestJson(raw);
 }
@@ -41,7 +47,10 @@ export function installEnginePoolDrainControl(opts: EnginePoolDrainControlOption
     handling = true;
     try {
       const req = readPoolDrainRequestFile(requestFile);
-      const result = await opts.pool.drainIdlePool(req.fraction);
+      const result =
+        req.count !== undefined
+          ? await opts.pool.drainIdleSessions(req.count)
+          : await opts.pool.drainIdlePool(req.fraction!);
       logEnginePoolDrain(opts.engineId, result.drained, result.remaining, result.blocked);
       opts.onDrained?.(result);
       try {

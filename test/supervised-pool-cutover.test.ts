@@ -281,6 +281,23 @@ describe("supervised pool engine blue/green cutover", () => {
     await pool.close();
   });
 
+  it("drainIdleSessions steps one-by-one mid-migrate", async () => {
+    const pool = await createTestPool({ poolTargetSize: 4, poolInitialFraction: 1 });
+    expect(pool.sessionIds).toHaveLength(4);
+
+    const step1 = await pool.drainIdleSessions(1);
+    expect(step1.drained).toBe(1);
+    expect(step1.remaining).toBe(3);
+    expect(pool.sessionIds).toHaveLength(3);
+
+    const step2 = await pool.drainIdleSessions(1);
+    expect(step2.drained).toBe(1);
+    expect(step2.remaining).toBe(2);
+    expect(pool.sessionIds).toHaveLength(2);
+
+    await pool.close();
+  });
+
   it("does not drain busy sessions", async () => {
     const pool = await createTestPool({
       poolTargetSize: 2,
@@ -350,9 +367,14 @@ describe("supervised pool engine blue/green cutover", () => {
     await pool.close();
   });
 
-  it("rejects boot with zero initial sessions", async () => {
-    await expect(
-      createTestPool({ poolTargetSize: 2, poolInitialFraction: 0 }),
-    ).rejects.toThrow(/at least one boot session/);
+  it("allows staging boot with zero initial sessions then scale", async () => {
+    const pool = await createTestPool({ poolTargetSize: 2, poolInitialFraction: 0 });
+    expect(pool.sessionIds).toHaveLength(0);
+
+    const scale = await pool.scalePool(1);
+    expect(scale.added).toBe(1);
+    expect(pool.sessionIds).toHaveLength(1);
+
+    await pool.close();
   });
 });
