@@ -9,7 +9,9 @@ import {
   ENGINE_PLANE_PATH_WORK_PULL,
   HEADER_OPE_REQUEST_ID,
   HEADER_OPE_SESSION_ID,
+  HEADER_OPE_TRAFFIC_CLASS,
   HEADER_USAGE_REPORT,
+  trafficClassHeaderMetaConsistent,
   INFERENCE_PATH,
   type AttestedConnectRequest,
   type AttestedConnectResponse,
@@ -268,6 +270,7 @@ export function startPullWorker(
 
     const workChunks: Buffer[] = [];
     let requestId = "";
+    let trafficClassHeader = "";
     let gotWork = false;
 
     pull.on("response", (headers) => {
@@ -278,6 +281,9 @@ export function startPullWorker(
       }
       const rid = headers[HEADER_OPE_REQUEST_ID];
       requestId = typeof rid === "string" ? rid : Array.isArray(rid) ? rid[0] ?? "" : "";
+      const tc = headers[HEADER_OPE_TRAFFIC_CLASS];
+      trafficClassHeader =
+        typeof tc === "string" ? tc : Array.isArray(tc) ? tc[0] ?? "" : "";
     });
 
     pull.on("data", (chunk) => {
@@ -296,6 +302,14 @@ export function startPullWorker(
         busy = true;
         try {
           const envelope = JSON.parse(Buffer.concat(workChunks).toString("utf8")) as OpeEnvelope;
+          const trafficClassCheck = trafficClassHeaderMetaConsistent(
+            trafficClassHeader || undefined,
+            envelope.meta?.traffic_class,
+          );
+          if (!trafficClassCheck.ok) {
+            throw new Error(`ope_traffic_class_invalid: ${trafficClassCheck.reason}`);
+          }
+
           let resultStream: import("node:http2").ClientHttp2Stream | undefined;
           let openedStreamingResult = false;
 

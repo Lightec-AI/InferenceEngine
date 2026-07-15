@@ -105,6 +105,11 @@ export interface OpeEnvelopeMeta {
   tenant?: string;
   metering?: { units?: number };
   route?: { engine_id?: string };
+  /**
+   * Work-envelope traffic class (`live_chat` | `api`). Must match
+   * {@link HEADER_OPE_TRAFFIC_CLASS} on engine-plane assign.
+   */
+  traffic_class?: "live_chat" | "api" | string;
   /** Gateway-origin background job (guard rewrite, metrics digest, etc.). */
   gateway_task?: GatewayPlaneTaskPayload;
 }
@@ -133,8 +138,58 @@ export const HEADER_OPE_EPHEMERAL_EPOCH = "x-ope-ephemeral-epoch";
 export const HEADER_OPE_CONVERSATION_ID = "x-ope-conversation-id";
 export const HEADER_OPE_REQUEST_ID = "x-ope-request-id";
 export const HEADER_OPE_SESSION_ID = "x-ope-session-id";
+/** HTTP/2 work-pull response header (lowercase for Node http2). */
+export const HEADER_OPE_TRAFFIC_CLASS = "x-ope-traffic-class";
+export const OPE_TRAFFIC_CLASS_LIVE_CHAT = "live_chat" as const;
+export const OPE_TRAFFIC_CLASS_API = "api" as const;
+export type OpeTrafficClass =
+  | typeof OPE_TRAFFIC_CLASS_LIVE_CHAT
+  | typeof OPE_TRAFFIC_CLASS_API;
+export const DEFAULT_OPE_TRAFFIC_CLASS: OpeTrafficClass = OPE_TRAFFIC_CLASS_LIVE_CHAT;
 export const CONTENT_TYPE_OPE_JSON = "application/ope+json";
 export const INFERENCE_PATH = "/v1/ope/inference";
+
+export function isOpeTrafficClass(raw: unknown): raw is OpeTrafficClass {
+  return raw === OPE_TRAFFIC_CLASS_LIVE_CHAT || raw === OPE_TRAFFIC_CLASS_API;
+}
+
+export function parseOpeTrafficClass(raw: unknown): OpeTrafficClass | null {
+  if (typeof raw !== "string") return null;
+  const normalized = raw.trim().toLowerCase();
+  return isOpeTrafficClass(normalized) ? normalized : null;
+}
+
+/** Unknown/missing → `live_chat`. Never invents `api`. */
+export function resolveOpeTrafficClass(raw: unknown): OpeTrafficClass {
+  return parseOpeTrafficClass(raw) ?? DEFAULT_OPE_TRAFFIC_CLASS;
+}
+
+export function opeTrafficClassQosRank(trafficClass: OpeTrafficClass): number {
+  return trafficClass === OPE_TRAFFIC_CLASS_LIVE_CHAT ? 0 : 1;
+}
+
+export function shouldMeterSubscriptionUsage(trafficClass: OpeTrafficClass): boolean {
+  return trafficClass === OPE_TRAFFIC_CLASS_LIVE_CHAT;
+}
+
+export function trafficClassHeaderMetaConsistent(
+  headerRaw: unknown,
+  metaRaw: unknown,
+): { ok: true; trafficClass: OpeTrafficClass } | { ok: false; reason: string } {
+  const fromHeader = parseOpeTrafficClass(headerRaw);
+  const fromMeta = parseOpeTrafficClass(metaRaw);
+  if (fromHeader && fromMeta && fromHeader !== fromMeta) {
+    return {
+      ok: false,
+      reason: `traffic_class mismatch: header=${fromHeader} meta=${fromMeta}`,
+    };
+  }
+  const trafficClass = fromHeader ?? fromMeta;
+  if (!trafficClass) {
+    return { ok: false, reason: "traffic_class missing" };
+  }
+  return { ok: true, trafficClass };
+}
 
 /** Attested engine plane (HTTP/2 on TLS). */
 export const ENGINE_PLANE_PATH_CONNECT = "/v1/ope/control/connect";
