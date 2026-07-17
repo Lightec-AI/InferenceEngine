@@ -3,8 +3,9 @@
 # Clients cross-check attestation engine.binary_sha256 against this release
 # (see TeaChat docs/ops/client-attestation-github-trust.md).
 #
-# Tag with the **engine train version** (e.g. v0.7.9) so the client can resolve
+# Tag with the **engine train** (X.Y.0, e.g. v0.8.0) so the client can resolve
 # https://github.com/Lightec-AI/InferenceEngine/releases/tag/v{engine.version}.
+# Same minor-train practice as gateway — use bump-engine-version, not revision tags.
 #
 # Optional: set repo variable OPE_REF to pin Lightec-AI/OPE (commit SHA or tag).
 # Default: OPE main at workflow time — for production cuts, pin OPE_REF to the
@@ -101,6 +102,6 @@ jobs:
 
             Clients verify `engine.binary_sha256` against **`SHA256SUMS`** / `libope_ffi.so`.
 
-            Tag this release with the **engine train version** (e.g. `v0.7.9`) that appears in attestation.
+            Tag this release with the **engine train** (e.g. `v0.8.0`, always X.Y.0) that appears in attestation.
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
