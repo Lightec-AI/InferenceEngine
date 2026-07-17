@@ -82,8 +82,8 @@ export async function loadOpeWasm(): Promise<WasmOpeClientFfi | null> {
   if (initPromise) return initPromise;
   initPromise = (async () => {
     try {
-      /** Resolved via `ope-wasm` package (`file:./pkg/ope-wasm`) — see `pnpm build:ope-wasm`. */
-      const mod = (await import("ope-wasm")) as OpeWasmModule;
+      /** Published npm package (see docs/ops/ope-registry-publish.md). */
+      const mod = (await import("@teechat/ope-wasm")) as OpeWasmModule;
       await mod.default();
       return wrapModule(mod);
     } catch {

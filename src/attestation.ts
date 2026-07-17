@@ -24,6 +24,8 @@ export interface QuoteClaims {
   tls_client_cert_sha256: string;
   engine: { version: string; binary_sha256: string };
   vllm: { version: string; binary_sha256: string };
+  /** Optional OPE semver identity (not REPORT_DATA-bound). */
+  ope?: { version: string; git_sha: string; libope_ffi_sha256: string };
   issued_at: string;
 }
 
@@ -213,6 +215,22 @@ export function verifyAttestationBundle(
   }
   if (bundle.vllm.binary_sha256 !== payload.vllm.binary_sha256) {
     return { ok: false, policyId: policy.policyId, reason: "vllm_hash_bundle_mismatch" };
+  }
+  if (bundle.ope || payload.ope) {
+    const ope = bundle.ope ?? payload.ope;
+    if (!bundle.ope || !payload.ope || !ope) {
+      return { ok: false, policyId: policy.policyId, reason: "ope_identity_bundle_mismatch" };
+    }
+    if (
+      bundle.ope.version !== payload.ope.version ||
+      bundle.ope.git_sha.toLowerCase() !== payload.ope.git_sha.toLowerCase() ||
+      bundle.ope.libope_ffi_sha256.toLowerCase() !== payload.ope.libope_ffi_sha256.toLowerCase()
+    ) {
+      return { ok: false, policyId: policy.policyId, reason: "ope_identity_bundle_mismatch" };
+    }
+    if (bundle.ope.libope_ffi_sha256.toLowerCase() !== payload.engine.binary_sha256.toLowerCase()) {
+      return { ok: false, policyId: policy.policyId, reason: "ope_ffi_hash_engine_mismatch" };
+    }
   }
 
   let gpuResult;

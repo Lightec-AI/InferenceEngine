@@ -26,6 +26,13 @@ export interface WorkloadMeasurements {
   binary_sha256: string;
 }
 
+/** Optional OPE identity (additive; not SNP REPORT_DATA-bound in v1). */
+export interface OpeWorkloadIdentity {
+  version: string;
+  git_sha: string;
+  libope_ffi_sha256: string;
+}
+
 export interface CpuTeeAttestation {
   kind: "tdx" | "sev-snp";
   quote: string;
@@ -44,6 +51,8 @@ export interface AttestationBundle {
   gpu_tee: GpuTeeAttestation;
   vllm: WorkloadMeasurements;
   engine: WorkloadMeasurements;
+  /** Present on engine trains that pin OPE semver (config/ope-version.json). */
+  ope?: OpeWorkloadIdentity;
 }
 
 export interface EngineEphemeralRegisterRequest {

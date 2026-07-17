@@ -9,7 +9,11 @@
 #
 # Optional: set repo variable OPE_REF to pin Lightec-AI/OPE (commit SHA or tag).
 # Default: OPE main at workflow time — for production cuts, pin OPE_REF to the
-# commit that built the deployed guest FFI.
+# commit that built the deployed guest FFI (and mirror it in TeaChat
+# config/ope-version.json).
+#
+# The deployable engine tarball (Node launcher + packaging) is built in the
+# *private* TeaChat monorepo around this measured .so — never checked out here.
 
 name: Release
 
@@ -101,6 +105,10 @@ jobs:
             ## Measured artifact
 
             Clients verify `engine.binary_sha256` against **`SHA256SUMS`** / `libope_ffi.so`.
+
+            The deployable `teechat-engine-*.tar.gz` is packaged in the private TeaChat
+            monorepo around this `.so` (see TeaChat `config/ope-version.json` +
+            `scripts/ops/build-engine-release.sh`).
 
             Tag this release with the **engine train** (e.g. `v0.8.0`, always X.Y.0) that appears in attestation.
         env:

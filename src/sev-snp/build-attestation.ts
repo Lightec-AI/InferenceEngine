@@ -19,6 +19,7 @@ export interface BuildSevSnpAttestationArgs {
     engineBinarySha256: string;
     vllmVersion: string;
     vllmBinarySha256: string;
+    ope?: { version: string; gitSha: string; libopeFfiSha256: string };
   };
   env?: NodeJS.ProcessEnv;
   root?: string;
@@ -57,6 +58,13 @@ export function buildSevSnpAttestationBundle(args: BuildSevSnpAttestationArgs): 
     },
     issued_at: issuedAt,
   };
+  if (measurements.ope) {
+    claims.ope = {
+      version: measurements.ope.version,
+      git_sha: measurements.ope.gitSha,
+      libope_ffi_sha256: measurements.ope.libopeFfiSha256,
+    };
+  }
 
   const wrapper: SevSnpQuoteWrapper = {
     v: 2,
@@ -81,5 +89,8 @@ export function buildSevSnpAttestationBundle(args: BuildSevSnpAttestationArgs): 
     engine: claims.engine,
     vllm: claims.vllm,
   };
+  if (claims.ope) {
+    bundle.ope = claims.ope;
+  }
   return bundle;
 }
