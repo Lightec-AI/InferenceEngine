@@ -130,6 +130,17 @@ export {
   type OpeFfi,
   type EngineIdentityFull,
 } from "./native/ope-ffi.js";
+export { loadEngineEnvFiles } from "./runtime/load-env.js";
+export { loadEnginePlaneClientTls, type EngineClientTlsMaterial } from "./runtime/engine-tls.js";
+export { engineGatewayPlatformVerifyFromEnv } from "./runtime/engine-gateway-platform-verify.js";
+export {
+  registerAttestationBackendFromEnv,
+  attestationBackendModeFromEnv,
+  resetAttestationBackendRegistration,
+  getLastAttestationBackendRegistration,
+  type AttestationBackendMode,
+  type RegisterAttestationBackendResult,
+} from "./runtime/register-attestation-backend.js";
 export {
   createWasmClientCryptoProvider,
   type WasmOpeClientFfi,

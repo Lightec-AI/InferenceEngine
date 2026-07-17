@@ -30,7 +30,11 @@
       "import": "./src/native/ope-wasm.ts"
     }
   },
+  "bin": {
+    "teechat-inference-engine": "./scripts/run-engine.ts"
+  },
   "scripts": {
+    "start": "node --import tsx scripts/run-engine.ts",
     "build:ffi": "node scripts/build-ope-ffi.mjs",
     "build:wasm": "node scripts/build-ope-wasm.mjs",
     "test": "vitest run",
@@ -41,6 +45,7 @@
     "node": ">=20"
   },
   "dependencies": {
+    "@teechat/attested-mtls-node": "file:../attested-mtls/bindings/node",
     "@teechat/ope-wasm": "0.1.0",
     "koffi": "^2.16.2"
   },
