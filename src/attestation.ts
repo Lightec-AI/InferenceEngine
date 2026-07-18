@@ -26,6 +26,8 @@ export interface QuoteClaims {
   vllm: { version: string; binary_sha256: string };
   /** Optional OPE semver identity (not REPORT_DATA-bound). */
   ope?: { version: string; git_sha: string; libope_ffi_sha256: string };
+  /** Optional attested-mtls identity (not REPORT_DATA-bound). */
+  attested_mtls?: { version: string; git_sha: string; lib_attested_mtls_sha256: string };
   issued_at: string;
 }
 

@@ -23,26 +23,28 @@ The TeeChat gateway (`server/confidential-ai/` in the main repo) handles registr
 | `src/testing/` | Mock engine keys and quotes for integration tests |
 | `docs/` | Engine design notes |
 
-## Real crypto (OPE FFI)
+## Real crypto (OPE FFI) + runtime release
 
-Hybrid PQ E2E lives in the **OPE** crate and is consumed as the measured
-`libope_ffi.so` from the [OPE GitHub Release](https://github.com/Lightec-AI/OPE/releases)
-(pinned in [`config/tcb-pins.json`](./config/tcb-pins.json)).
+Hybrid PQ E2E lives in the **OPE** crate. Attested mTLS helpers live in
+**teechat-attested-mtls**. InferenceEngine releases a **compiled JS runtime bundle**
+plus optional companion `.so` files (same bytes as those upstream Releases).
 
 ```bash
-pnpm fetch:ffi            # download pinned libope_ffi.so → native/
-pnpm fetch:attested-mtls  # download pinned libattested_mtls.so → native/
-# break-glass only (bytes will not match the Release unless toolchains match):
-pnpm build:ffi            # cargo build -p ope-ffi from TEECHAT_OPE_DIR / ../ope
+pnpm build                 # → dist/inference-engine.mjs
+TEECHAT_IE_INCLUDE_NATIVES=1 pnpm pack:runtime   # → dist/release/*.tar.gz + SUMS
+pnpm fetch:ffi             # OPE .so only
+pnpm fetch:attested-mtls   # attested-mtls .so only
 ```
 
-npm dependencies (no sibling git checkouts required):
+Primary measured artifact: `inference-engine-runtime-*.tar.gz` (`engine.binary_sha256`).
+OPE / attested-mtls digests are independent attestation fields.
+
+npm dependencies (dev/source layout):
 
 - `@teechat/ope-wasm`
-- `@teechat/attested-mtls-node` (set `ATTESTED_MTLS_LIB_PATH` or use `native/libattested_mtls.so`)
+- `@teechat/attested-mtls-node` (set `ATTESTED_MTLS_LIB_PATH` or use `native/`)
 
-The native OPE library is resolved from `TEECHAT_OPE_FFI_LIB`, `./native/`, or a
-local OPE `target/` tree. Build mode is controlled by `TEECHAT_BUILD`/`NODE_ENV`:
+Build mode is controlled by `TEECHAT_BUILD`/`NODE_ENV`:
 
 - **production** — real provider/attestation required; mocks refused (fail closed).
 - **development** — real when the library is available, else mock; override with

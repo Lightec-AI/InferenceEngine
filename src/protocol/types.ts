@@ -26,11 +26,18 @@ export interface WorkloadMeasurements {
   binary_sha256: string;
 }
 
-/** Optional OPE identity (additive; not SNP REPORT_DATA-bound in v1). */
+/** Optional OPE identity (independent TCB; not equal to engine.binary_sha256). */
 export interface OpeWorkloadIdentity {
   version: string;
   git_sha: string;
   libope_ffi_sha256: string;
+}
+
+/** Optional attested-mtls identity (independent TCB). */
+export interface AttestedMtlsWorkloadIdentity {
+  version: string;
+  git_sha: string;
+  lib_attested_mtls_sha256: string;
 }
 
 export interface CpuTeeAttestation {
@@ -50,9 +57,12 @@ export interface AttestationBundle {
   cpu_tee: CpuTeeAttestation;
   gpu_tee: GpuTeeAttestation;
   vllm: WorkloadMeasurements;
+  /** InferenceEngine runtime measurement (compiled/bundled IE artifact). */
   engine: WorkloadMeasurements;
-  /** Present on engine trains that pin OPE semver (config/ope-version.json). */
+  /** Present when OPE FFI is pinned (config/ope-version.json / tcb-pins). */
   ope?: OpeWorkloadIdentity;
+  /** Present when attested-mtls FFI is pinned. */
+  attested_mtls?: AttestedMtlsWorkloadIdentity;
 }
 
 export interface EngineEphemeralRegisterRequest {
