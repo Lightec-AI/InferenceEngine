@@ -19,7 +19,7 @@ function readPem(env: NodeJS.ProcessEnv, envKey: string, fixtureName: string): s
     if (fromEnv.includes("-----BEGIN")) return fromEnv;
     return readFileSync(resolve(fromEnv), "utf8");
   }
-  // Prefer TeaChat monorepo fixtures when present; else empty (caller must set env).
+  // Prefer TeeChat monorepo fixtures when present; else empty (caller must set env).
   const candidates = [
     resolve(process.cwd(), "server/gateway/mtls/fixtures", fixtureName),
     resolve(here, "../../../../server/gateway/mtls/fixtures", fixtureName),

@@ -1,4 +1,4 @@
-/** TeaChat envelope wrapping NVIDIA CC evidence collected via nvattest (v1). */
+/** TeeChat envelope wrapping NVIDIA CC evidence collected via nvattest (v1). */
 export interface NvCcGpuEvidenceEnvelopeV1 {
   v: 1;
   kind: "nv-cc";

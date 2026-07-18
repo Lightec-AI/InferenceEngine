@@ -57,7 +57,7 @@ function claimRequiredTrue(claims: Record<string, unknown>, key: string): boolea
   }
 }
 
-/** Validate nvattest local-verifier claims against TeaChat GPU policy. */
+/** Validate nvattest local-verifier claims against TeeChat GPU policy. */
 export function validateNvGpuClaimsAgainstPolicy(
   claims: Record<string, unknown>,
   policy: GpuAttestationPolicy,

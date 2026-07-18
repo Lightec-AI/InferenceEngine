@@ -3,7 +3,7 @@
  * Build the `ope-ffi` cdylib consumed by the Node binding (`src/native/ope-ffi.ts`).
  *
  * Resolves the OPE workspace from `TEECHAT_OPE_DIR` or the sibling `../ope` directory
- * (the TeaChat monorepo layout). Builds the release profile by default; set
+ * (the TeeChat monorepo layout). Builds the release profile by default; set
  * `TEECHAT_FFI_PROFILE=debug` for a debug build.
  */
 import { execFileSync } from "node:child_process";

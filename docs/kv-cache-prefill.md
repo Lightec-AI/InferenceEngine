@@ -1,6 +1,6 @@
 # KV cache prefill (inference engine)
 
-How the **TeaChat inference engine** (not the gateway or OPE library) uses **vLLM automatic prefix caching (APC)** and issues **internal prefill** calls to reduce **TTFT**.
+How the **TeeChat inference engine** (not the gateway or OPE library) uses **vLLM automatic prefix caching (APC)** and issues **internal prefill** calls to reduce **TTFT**.
 
 OPE (`vendor/ope`) is crypto only. The gateway forwards opaque envelopes; only the engine decrypts and talks to vLLM.
 

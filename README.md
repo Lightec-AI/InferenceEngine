@@ -1,6 +1,6 @@
 # @teechat/inference-engine
 
-TeaChat **inference engine** package: decrypt OPE envelopes, plan vLLM KV prefill, call vLLM, encrypt responses, and sign usage reports.
+TeeChat **inference engine** package: decrypt OPE envelopes, plan vLLM KV prefill, call vLLM, encrypt responses, and sign usage reports.
 
 The TeeChat gateway (`server/confidential-ai/` in the main repo) handles registry, affinity, and opaque forward only. The engine performs real hybrid PQ decryption via the OPE FFI (see "Real crypto" below).
 
@@ -40,8 +40,8 @@ or `vendor/ope/target`. Build mode is controlled by `TEECHAT_BUILD`/`NODE_ENV`:
   `TEECHAT_CRYPTO=real|mock` and force real attestation with `TEECHAT_FORCE_REAL_CRYPTO=1`.
 
 > **Node / engine:** `koffi` loads `ope-ffi` (`pnpm build:ffi`).  
-> **Browser / Capacitor:** use the `ope-wasm` crate (`pnpm build:wasm` or TeaChat `pnpm build:ope-wasm`).
-> TeaChat imports `@teechat/inference-engine/browser` and `@teechat/ope-wasm` — do not import the main
+> **Browser / Capacitor:** use the `ope-wasm` crate (`pnpm build:wasm` or TeeChat `pnpm build:ope-wasm`).
+> TeeChat imports `@teechat/inference-engine/browser` and `@teechat/ope-wasm` — do not import the main
 > package barrel from Vite (it pulls Node-only modules).
 
 ## Scripts

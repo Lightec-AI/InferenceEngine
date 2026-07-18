@@ -3,7 +3,7 @@
  * epoch + identity signature), then encrypt the request and decrypt the response
  * stream — all real hybrid PQ crypto via the OPE FFI provider.
  *
- * This is the reference client used by tests and by the TeaChat app/runtime. It is
+ * This is the reference client used by tests and by the TeeChat app/runtime. It is
  * transport-light: it takes a `fetch`-compatible function so it can run in Node, the
  * browser, or Capacitor.
  */

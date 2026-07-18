@@ -6,7 +6,7 @@
  *   - libope_ffi available (TEECHAT_OPE_FFI_LIB or build:ffi)
  *   - OpenAI-compatible upstream (Ollama/vLLM)
  *
- * Env: see TeaChat docs/ops/engine-release.md
+ * Env: see TeeChat docs/ops/engine-release.md
  */
 import { loadEngineEnvFiles } from "../src/runtime/load-env.js";
 

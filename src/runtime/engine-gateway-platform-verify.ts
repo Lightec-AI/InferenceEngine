@@ -10,7 +10,7 @@ import type { EnginePlanePoolClientOptions } from "../engine-plane/pool-client.j
 
 /**
  * Engine-side mutual gateway platform verify at attested connect (SEC-029).
- * Reads TeaChat env keys; does not depend on TeaChat regional URL helpers.
+ * Reads TeeChat env keys; does not depend on TeeChat regional URL helpers.
  */
 export function engineGatewayPlatformVerifyFromEnv(
   env: NodeJS.ProcessEnv = process.env,
