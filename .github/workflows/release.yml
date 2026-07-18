@@ -1,16 +1,13 @@
-# Tag release: build measured OPE FFI (libope_ffi.so), record SHA256SUMS.
-#
-# Clients cross-check attestation engine.binary_sha256 against this release
-# (see TeeChat docs/ops/client-attestation-github-trust.md).
+# Tag release: attach measured OPE FFI (libope_ffi.so) from the pinned OPE GitHub
+# Release — do not rebuild OPE from source. Clients cross-check attestation
+# engine.binary_sha256 against this release (see TeeChat
+# docs/ops/client-attestation-github-trust.md).
 #
 # Tag with the **engine train** (X.Y.0, e.g. v0.8.0) so the client can resolve
 # https://github.com/Lightec-AI/InferenceEngine/releases/tag/v{engine.version}.
-# Same minor-train practice as gateway — use bump-engine-version, not revision tags.
 #
-# Optional: set repo variable OPE_REF to pin Lightec-AI/OPE (commit SHA or tag).
-# Default: OPE main at workflow time — for production cuts, pin OPE_REF to the
-# commit that built the deployed guest FFI (and mirror it in TeeChat
-# config/ope-version.json).
+# Pins: config/tcb-pins.json (OPE asset URL + libopeFfiSha256).
+# Break-glass local rebuild: npm run build:ffi (not used by this workflow).
 #
 # The deployable engine tarball (Node launcher + packaging) is built in the
 # *private* TeeChat monorepo around this measured .so — never checked out here.
@@ -25,9 +22,6 @@ on:
 permissions:
   contents: write
 
-env:
-  CARGO_TERM_COLOR: always
-
 jobs:
   release:
     runs-on: ubuntu-latest
@@ -37,51 +31,40 @@ jobs:
         with:
           path: InferenceEngine
 
-      - name: Checkout OPE (FFI source)
-        uses: actions/checkout@v4
-        with:
-          repository: Lightec-AI/OPE
-          path: ope
-          # Optional repo variable OPE_REF (commit/tag). Empty → OPE default branch.
-          ref: ${{ vars.OPE_REF }}
-
-      - uses: dtolnay/rust-toolchain@stable
-
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: ope → target
-
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
 
-      - name: Build libope_ffi.so
+      - name: Fetch pinned libope_ffi.so from OPE Release
         working-directory: InferenceEngine
-        env:
-          TEECHAT_OPE_DIR: ${{ github.workspace }}/ope
         run: |
           set -euo pipefail
-          npm run build:ffi
-          SO="${TEECHAT_OPE_DIR}/target/release/libope_ffi.so"
-          test -f "$SO"
+          node scripts/fetch-ope-ffi.mjs
           mkdir -p dist
-          cp -a "$SO" dist/libope_ffi.so
+          cp -a native/libope_ffi.so dist/libope_ffi.so
           (
             cd dist
             sha256sum libope_ffi.so | tee SHA256SUMS
           )
-          OPE_SHA="$(awk '{print $1}' dist/SHA256SUMS)"
-          OPE_GIT="$(git -C "$TEECHAT_OPE_DIR" rev-parse HEAD)"
+          OPE_SHA="$(awk '/libope_ffi\.so$/ {print $1}' dist/SHA256SUMS)"
           VERSION="${GITHUB_REF_NAME#v}"
-          python3 - "$OPE_SHA" "$OPE_GIT" "$VERSION" "$GITHUB_REF_NAME" <<'PY'
+          OPE_TAG="$(node -e 'const p=require("./config/tcb-pins.json"); process.stdout.write(p.ope.tag||"")')"
+          OPE_GIT="$(node -e 'const p=require("./config/tcb-pins.json"); process.stdout.write(p.ope.gitSha||"")')"
+          OPE_VER="$(node -e 'const p=require("./config/tcb-pins.json"); process.stdout.write(p.ope.version||"")')"
+          python3 - "$OPE_SHA" "$OPE_GIT" "$VERSION" "$GITHUB_REF_NAME" "$OPE_TAG" "$OPE_VER" <<'PY'
           import json, sys
-          ope_sha, ope_git, version, tag = sys.argv[1:5]
+          ope_sha, ope_git, version, tag, ope_tag, ope_ver = sys.argv[1:7]
+          if not ope_sha or len(ope_sha) != 64:
+              raise SystemExit("empty ope sha")
           doc = {
             "schema": "teechat-inference-engine-release/v1",
             "version": version,
             "tag": tag,
             "opeFfiSha256": ope_sha,
             "opeGitSha": ope_git,
+            "opeVersion": ope_ver,
+            "opeTag": ope_tag,
+            "opeAssetSource": "Lightec-AI/OPE GitHub Release (re-attached, not rebuilt)",
             "notes": "Measured artifact is libope_ffi.so (attestation engine.binary_sha256).",
           }
           open("dist/RELEASE_MANIFEST.json", "w", encoding="utf-8").write(
@@ -105,6 +88,9 @@ jobs:
             ## Measured artifact
 
             Clients verify `engine.binary_sha256` against **`SHA256SUMS`** / `libope_ffi.so`.
+
+            This file is the **OPE** GitHub Release asset re-attached here (same bytes;
+            see `config/tcb-pins.json`). It is **not** rebuilt from OPE source in this workflow.
 
             The deployable `teechat-engine-*.tar.gz` is packaged in the private TeeChat
             monorepo around this `.so` (see TeeChat `config/ope-version.json` +

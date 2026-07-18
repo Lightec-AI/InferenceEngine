@@ -35,6 +35,8 @@
   },
   "scripts": {
     "start": "node --import tsx scripts/run-engine.ts",
+    "fetch:ffi": "node scripts/fetch-ope-ffi.mjs",
+    "fetch:attested-mtls": "node scripts/fetch-attested-mtls.mjs",
     "build:ffi": "node scripts/build-ope-ffi.mjs",
     "build:wasm": "node scripts/build-ope-wasm.mjs",
     "test": "vitest run",
@@ -45,7 +47,7 @@
     "node": ">=20"
   },
   "dependencies": {
-    "@teechat/attested-mtls-node": "file:../attested-mtls/bindings/node",
+    "@teechat/attested-mtls-node": "0.1.0",
     "@teechat/ope-wasm": "0.1.0",
     "koffi": "^2.16.2"
   },

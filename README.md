@@ -25,15 +25,24 @@ The TeeChat gateway (`server/confidential-ai/` in the main repo) handles registr
 
 ## Real crypto (OPE FFI)
 
-The hybrid PQ E2E path (X25519MLKEM768 + ChaCha20-Poly1305) is implemented in Rust
-(`vendor/ope`) and exposed to Node via the `ope-ffi` cdylib loaded with `koffi`.
+Hybrid PQ E2E lives in the **OPE** crate and is consumed as the measured
+`libope_ffi.so` from the [OPE GitHub Release](https://github.com/Lightec-AI/OPE/releases)
+(pinned in [`config/tcb-pins.json`](./config/tcb-pins.json)).
 
 ```bash
-pnpm build:ffi   # cargo build -p ope-ffi (release) from the sibling vendor/ope
+pnpm fetch:ffi            # download pinned libope_ffi.so → native/
+pnpm fetch:attested-mtls  # download pinned libattested_mtls.so → native/
+# break-glass only (bytes will not match the Release unless toolchains match):
+pnpm build:ffi            # cargo build -p ope-ffi from TEECHAT_OPE_DIR / ../ope
 ```
 
-The native library is resolved from `TEECHAT_OPE_FFI_LIB`, the sibling `../ope/target`,
-or `vendor/ope/target`. Build mode is controlled by `TEECHAT_BUILD`/`NODE_ENV`:
+npm dependencies (no sibling git checkouts required):
+
+- `@teechat/ope-wasm`
+- `@teechat/attested-mtls-node` (set `ATTESTED_MTLS_LIB_PATH` or use `native/libattested_mtls.so`)
+
+The native OPE library is resolved from `TEECHAT_OPE_FFI_LIB`, `./native/`, or a
+local OPE `target/` tree. Build mode is controlled by `TEECHAT_BUILD`/`NODE_ENV`:
 
 - **production** — real provider/attestation required; mocks refused (fail closed).
 - **development** — real when the library is available, else mock; override with

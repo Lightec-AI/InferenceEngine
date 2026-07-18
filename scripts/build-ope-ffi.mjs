@@ -1,9 +1,12 @@
 #!/usr/bin/env node
 /**
- * Build the `ope-ffi` cdylib consumed by the Node binding (`src/native/ope-ffi.ts`).
+ * Build the `ope-ffi` cdylib — **break-glass** when a sibling OPE checkout exists.
+ *
+ * Production / CI: use `npm run fetch:ffi` (downloads the pinned OPE GitHub Release
+ * `libope_ffi.so` via `config/tcb-pins.json`) instead of compiling from source.
  *
  * Resolves the OPE workspace from `TEECHAT_OPE_DIR` or the sibling `../ope` directory
- * (the TeeChat monorepo layout). Builds the release profile by default; set
+ * (TeeChat monorepo layout). Builds the release profile by default; set
  * `TEECHAT_FFI_PROFILE=debug` for a debug build.
  */
 import { execFileSync } from "node:child_process";

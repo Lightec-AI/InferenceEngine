@@ -3,7 +3,7 @@
  *
  * Prereqs:
  *   - Gateway on TEECHAT_ENGINE_GATEWAY_URL
- *   - libope_ffi available (TEECHAT_OPE_FFI_LIB or build:ffi)
+ *   - libope_ffi available (TEECHAT_OPE_FFI_LIB, native/ from fetch:ffi, or break-glass build:ffi)
  *   - OpenAI-compatible upstream (Ollama/vLLM)
  *
  * Env: see TeeChat docs/ops/engine-release.md

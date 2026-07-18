@@ -100,6 +100,8 @@ export function candidateLibraryPaths(env: NodeJS.ProcessEnv = process.env): str
   const name = libFileName();
   const candidates: string[] = [];
   if (env.TEECHAT_OPE_FFI_LIB) candidates.push(resolve(env.TEECHAT_OPE_FFI_LIB));
+  // Pinned GitHub Release download (`pnpm fetch:ffi`).
+  candidates.push(resolve(packageRoot, "native", name));
   const opeDir = env.TEECHAT_OPE_DIR
     ? resolve(env.TEECHAT_OPE_DIR)
     : resolve(packageRoot, "..", "ope");
@@ -381,7 +383,7 @@ export function requireOpeFfi(env: NodeJS.ProcessEnv = process.env): OpeFfi {
   if (!ffi) {
     throw new OpeFfiError(
       `ope-ffi native library not found. Searched: ${candidateLibraryPaths(env).join(", ")}. ` +
-        `Build it with \`pnpm build:ffi\` (or set TEECHAT_OPE_FFI_LIB).`,
+        `Download with \`pnpm fetch:ffi\` (or set TEECHAT_OPE_FFI_LIB). Break-glass: \`pnpm build:ffi\`.`,
     );
   }
   return ffi;
