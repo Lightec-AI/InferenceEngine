@@ -51,7 +51,7 @@
   },
   "dependencies": {
     "@teechat/attested-mtls-node": "0.1.0",
-    "@teechat/ope-protocol": "file:../ope/bindings/typescript/ope-protocol",
+    "@teechat/ope-protocol": "0.1.1",
     "@teechat/ope-wasm": "0.1.0",
     "koffi": "^2.16.2"
   },
