@@ -5,6 +5,7 @@ import {
   ENGINE_PLANE_PATH_CONNECT,
   ENGINE_PLANE_PATH_DISCONNECT,
   ENGINE_PLANE_PATH_EPHEMERAL,
+  ENGINE_PLANE_PATH_INFERENCE_RESULT,
   ENGINE_PLANE_PATH_POOL,
   ENGINE_PLANE_PATH_WORK_PULL,
   HEADER_OPE_REQUEST_ID,
@@ -12,7 +13,6 @@ import {
   HEADER_OPE_TRAFFIC_CLASS,
   HEADER_USAGE_REPORT,
   trafficClassHeaderMetaConsistent,
-  INFERENCE_PATH,
   type AttestedConnectRequest,
   type AttestedConnectResponse,
   type AttestedDisconnectRequest,
@@ -40,8 +40,6 @@ import { vllmConfigFromEnv } from "../upstream/vllm-chat.js";
 import { isGatewayPlaneTaskEnvelope } from "../server/gateway-plane-task-inference.js";
 import { runMockInferenceOnEnvelope, type MockInferenceOptions } from "./inference-handler.js";
 import type { OpeNdjsonStreamWriter } from "../server/ope-inference.js";
-
-export const ENGINE_PLANE_PATH_INFERENCE_RESULT = `${INFERENCE_PATH}/result`;
 
 export interface EnginePlanePoolClientOptions {
   gatewayBaseUrl: string;
