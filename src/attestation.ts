@@ -230,8 +230,9 @@ export function verifyAttestationBundle(
     ) {
       return { ok: false, policyId: policy.policyId, reason: "ope_identity_bundle_mismatch" };
     }
-    if (bundle.ope.libope_ffi_sha256.toLowerCase() !== payload.engine.binary_sha256.toLowerCase()) {
-      return { ok: false, policyId: policy.policyId, reason: "ope_ffi_hash_engine_mismatch" };
+    // Independent TCBs: IE runtime digest must not equal measured libope_ffi.so.
+    if (bundle.ope.libope_ffi_sha256.toLowerCase() === payload.engine.binary_sha256.toLowerCase()) {
+      return { ok: false, policyId: policy.policyId, reason: "ope_ffi_hash_collides_with_engine" };
     }
   }
 
