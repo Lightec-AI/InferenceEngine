@@ -92,6 +92,16 @@ describe("supervised pool gateway migration", () => {
     expect(connectUrls).toContain("https://127.0.0.1:8790");
     expect(poolClient.gracefulDisconnectAttestedSession).toHaveBeenCalled();
 
+    // Sticky primary: after migrate, drain+scale must dial the migrate target (not boot env).
+    await pool.migrateGatewayPool("https://127.0.0.1:8790", 1);
+    const drain = await pool.drainIdlePool(0.5);
+    expect(drain.drained).toBe(1);
+    const beforeScale = connectUrls.length;
+    const scale = await pool.scalePool(2);
+    expect(scale.blocked).toBe(false);
+    expect(scale.added).toBe(1);
+    expect(connectUrls.slice(beforeScale)).toEqual(["https://127.0.0.1:8790"]);
+
     await pool.close();
   });
 });

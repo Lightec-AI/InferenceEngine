@@ -175,7 +175,8 @@ export async function createSupervisedEnginePlanePool(
   }
 
   const engineId = opts.connect.engine_id;
-  const primaryGatewayUrl = opts.gatewayBaseUrl;
+  /** Updated on migrate so reconnect / scale use the migration target, not boot env. */
+  let primaryGatewayUrl = opts.gatewayBaseUrl;
   const policy = epochRotationPolicyFromEnv();
   const slots: SessionSlot[] = [];
   let closed = false;
@@ -501,6 +502,8 @@ export async function createSupervisedEnginePlanePool(
     sessionsByGatewayUrl: () => sessionsByGatewayUrlFromSlots(slots),
     migrateGatewayPool: async (targetUrl: string, fraction: number): Promise<GatewayMigrationResult> => {
       const normalized = targetUrl.trim();
+      // Sticky primary: reconnect/scale must dial the migration target, not boot env.
+      if (normalized) primaryGatewayUrl = normalized;
       const onTarget = slots.filter((s) => s.gatewayBaseUrl === normalized).length;
       const sourceSlots = slots.filter((s) => s.gatewayBaseUrl !== normalized);
       const idleOnSource = sourceSlots.filter((s) => !s.pullWorker.isBusy()).length;
