@@ -17,14 +17,6 @@
       "types": "./src/protocol/ope-stream.ts",
       "import": "./src/protocol/ope-stream.ts"
     },
-    "./testing": {
-      "types": "./src/testing/index.ts",
-      "import": "./src/testing/index.ts"
-    },
-    "./browser": {
-      "types": "./src/browser.ts",
-      "import": "./src/browser.ts"
-    },
     "./wasm-loader": {
       "types": "./src/native/ope-wasm.ts",
       "import": "./src/native/ope-wasm.ts"

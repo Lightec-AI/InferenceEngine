@@ -1,5 +1,6 @@
 /**
- * Browser / Capacitor-safe exports (no `ope-ffi`, `ope-wasm` loader, or Node attestation verify).
+ * @deprecated Public `@teechat/inference-engine/browser` export removed.
+ * TeeChat clients use `src/lib/confidential/ie-browser/`. Kept for IE-internal reference.
  */
 
 export {
