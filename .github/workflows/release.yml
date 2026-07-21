@@ -25,6 +25,14 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
+          registry-url: "https://registry.npmjs.org"
+
+      - name: Install dependencies
+        run: |
+          set -euo pipefail
+          # package.json pins @teechat/ope-protocol (and companions) from npm;
+          # esbuild --packages=bundle needs node_modules present.
+          npm install --no-fund --no-audit
 
       - name: Pack runtime (+ companion natives)
         env:
