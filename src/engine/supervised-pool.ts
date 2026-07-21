@@ -33,13 +33,13 @@ import {
 } from "./attestation-refresh.js";
 import { planGatewayMigration } from "./gateway-migration.js";
 import {
+  bootPoolSessionCount,
   createPoolConnectThrottleFromEnv,
-  initialPoolSessionCount,
   mapWithConcurrency,
   planPoolDrain,
   planPoolScale,
+  poolBaselineFromEnv,
   poolConnectConcurrencyFromEnv,
-  poolInitialFractionFromEnv,
 } from "./pool-cutover.js";
 import { logEnginePoolScale } from "../ops/engine-events.js";
 import { generateGatewayConnectChallengeNonce } from "./gateway-connect-nonce.js";
@@ -47,6 +47,7 @@ import { generateGatewayConnectChallengeNonce } from "./gateway-connect-nonce.js
 const RECONNECT_BASE_MS = 1_000;
 const RECONNECT_MAX_MS = 30_000;
 const PRUNE_INTERVAL_MS = 60_000;
+const DESIRED_POOL_DEBOUNCE_MS = 2_000;
 
 function poolReconnectCoordinationFromEnv(env: NodeJS.ProcessEnv = process.env): {
   failThreshold: number;
@@ -85,10 +86,13 @@ export interface SupervisedEnginePlanePoolOptions extends EnginePlanePoolClientO
   refreshAttestation?: () => AttestationBundle;
   attestationRefresh?: Pick<EngineAttestationRefreshContext, "useSevSnp" | "env" | "root">;
   /**
-   * Fraction of poolTargetSize to open on boot (default 1). Use 0.5 for green staging slot
-   * during in-place engine blue/green — remainder via scalePool().
+   * Fraction of poolTargetSize to open on boot. When unset (and env fraction unset),
+   * boots at {@link poolBaselineFromEnv} (default 4). Use 0 for staging zero-boot;
+   * 0.5 for half-pool green cutover.
    */
   poolInitialFraction?: number;
+  /** Floor when applying gateway desired-pool hints (default 4). */
+  poolBaseline?: number;
 }
 
 export interface GatewayMigrationResult {
@@ -337,7 +341,7 @@ export async function createSupervisedEnginePlanePool(
       slot.reconnectAttempt = 0;
       bindSessionClose(slot);
       await registerEpochOnSession(session, sessionId);
-      slot.pullWorker = startPullWorker(session, sessionId, inference, opts.onError);
+      startPullWorkerOnSlot(slot);
       supervisor.markHealthy();
       clearPoolReconnectCircuit();
       logEngineSessionReconnect(engineId, sessionId, attempt, { gracefulDisconnect });
@@ -388,8 +392,143 @@ export async function createSupervisedEnginePlanePool(
     return slot;
   };
 
+  const poolBaseline = opts.poolBaseline ?? poolBaselineFromEnv(process.env);
+  let desiredApplyTimer: ReturnType<typeof setTimeout> | null = null;
+  let pendingDesired: number | null = null;
+  let desiredApplyInFlight = false;
+
+  const drainSlotAt = async (index: number): Promise<void> => {
+    const slot = slots[index];
+    if (!slot) return;
+    if (slot.pullWorker.isBusy()) {
+      throw new Error(`session ${slot.sessionId} busy — cannot drain`);
+    }
+    if (slot.reconnectTimer) {
+      clearTimeout(slot.reconnectTimer);
+      slot.reconnectTimer = null;
+    }
+    slot.pullWorker.stop();
+    slot.session.removeListener("close", slot.onClose);
+    slot.session.removeListener("error", slot.onClose);
+    await gracefulDisconnectAttestedSession(
+      slot.session,
+      slot.sessionId,
+      engineId,
+      "upgrade",
+    ).catch(() => undefined);
+    if (!slot.session.destroyed) slot.session.close();
+    slots.splice(index, 1);
+  };
+
+  const scalePoolImpl = async (targetSize: number): Promise<PoolScaleResult> => {
+    const plan = planPoolScale({
+      poolTargetSize: opts.poolTargetSize,
+      currentCount: slots.length,
+      targetSize,
+    });
+    if (plan.blocked) {
+      return {
+        added: 0,
+        total: slots.length,
+        targetSize,
+        blocked: true,
+        reason: plan.reason,
+      };
+    }
+
+    const scaleConcurrency = poolConnectConcurrencyFromEnv(process.env, plan.toAdd);
+    const scaleChallenge = connectChallengeForBatch();
+    const scaledSlots = await mapWithConcurrency(plan.toAdd, scaleConcurrency, async () => {
+      const slot = await attachSlotCore(primaryGatewayUrl, scaleChallenge);
+      await registerEpochOnSession(slot.session, slot.sessionId);
+      startPullWorkerOnSlot(slot);
+      return slot;
+    });
+    slots.push(...scaledSlots);
+    const added = scaledSlots.length;
+
+    if (added > 0) {
+      logEnginePoolScale(engineId, added, slots.length);
+    }
+
+    return {
+      added,
+      total: slots.length,
+      targetSize: plan.targetSize,
+      blocked: false,
+    };
+  };
+
+  const drainIdleSessionsImpl = async (count: number): Promise<PoolDrainResult> => {
+    const idleCount = slots.filter((s) => !s.pullWorker.isBusy()).length;
+    const plan = planPoolDrain({
+      poolTargetSize: opts.poolTargetSize,
+      currentCount: slots.length,
+      count,
+      idleCount,
+    });
+
+    let drained = 0;
+    for (let i = 0; i < plan.toDrain; i++) {
+      const index = slots.findIndex((s) => !s.pullWorker.isBusy());
+      if (index < 0) break;
+      await drainSlotAt(index);
+      drained += 1;
+    }
+
+    const remaining = slots.length;
+    return {
+      drained,
+      remaining,
+      targetRemaining: plan.targetRemaining,
+      blocked: plan.blocked || (plan.toDrain > 0 && drained < plan.toDrain),
+      reason: plan.reason,
+    };
+  };
+
+  const applyDesiredPoolTarget = async (rawDesired: number): Promise<void> => {
+    if (closed) return;
+    const desired = Math.min(
+      opts.poolTargetSize,
+      Math.max(poolBaseline, Math.floor(rawDesired)),
+    );
+    const current = slots.length;
+    if (desired === current) return;
+    if (desired > current) {
+      await scalePoolImpl(desired);
+      return;
+    }
+    const toDrain = current - desired;
+    if (toDrain < 1) return;
+    await drainIdleSessionsImpl(toDrain);
+  };
+
+  const onDesiredPoolTarget = (desired: number): void => {
+    if (closed) return;
+    pendingDesired = desired;
+    if (desiredApplyTimer) return;
+    desiredApplyTimer = setTimeout(() => {
+      desiredApplyTimer = null;
+      const target = pendingDesired;
+      pendingDesired = null;
+      if (target == null || desiredApplyInFlight) return;
+      desiredApplyInFlight = true;
+      void applyDesiredPoolTarget(target).finally(() => {
+        desiredApplyInFlight = false;
+        if (pendingDesired != null) onDesiredPoolTarget(pendingDesired);
+      });
+    }, DESIRED_POOL_DEBOUNCE_MS);
+    desiredApplyTimer.unref?.();
+  };
+
   const startPullWorkerOnSlot = (slot: SessionSlot): void => {
-    slot.pullWorker = startPullWorker(slot.session, slot.sessionId, inference, opts.onError);
+    slot.pullWorker = startPullWorker(
+      slot.session,
+      slot.sessionId,
+      inference,
+      opts.onError,
+      onDesiredPoolTarget,
+    );
   };
 
   const migrateOneSession = async (slot: SessionSlot, targetUrl: string): Promise<void> => {
@@ -423,35 +562,14 @@ export async function createSupervisedEnginePlanePool(
     slot.reconnectAttempt = 0;
     bindSessionClose(slot);
     await registerEpochOnSession(newSession, sessionId);
-    slot.pullWorker = startPullWorker(newSession, sessionId, inference, opts.onError);
+    startPullWorkerOnSlot(slot);
   };
 
-  const drainSlotAt = async (index: number): Promise<void> => {
-    const slot = slots[index];
-    if (!slot) return;
-    if (slot.pullWorker.isBusy()) {
-      throw new Error(`session ${slot.sessionId} busy — cannot drain`);
-    }
-    if (slot.reconnectTimer) {
-      clearTimeout(slot.reconnectTimer);
-      slot.reconnectTimer = null;
-    }
-    slot.pullWorker.stop();
-    slot.session.removeListener("close", slot.onClose);
-    slot.session.removeListener("error", slot.onClose);
-    await gracefulDisconnectAttestedSession(
-      slot.session,
-      slot.sessionId,
-      engineId,
-      "upgrade",
-    ).catch(() => undefined);
-    if (!slot.session.destroyed) slot.session.close();
-    slots.splice(index, 1);
-  };
-
-  const poolInitialFraction =
-    opts.poolInitialFraction ?? poolInitialFractionFromEnv(process.env);
-  const bootSessionCount = initialPoolSessionCount(opts.poolTargetSize, poolInitialFraction);
+  const bootSessionCount = bootPoolSessionCount(
+    opts.poolTargetSize,
+    process.env,
+    opts.poolInitialFraction,
+  );
   // pool_initial_fraction=0 is valid for blue/green staging: unit up, 0 sessions until pair-step.
   if (opts.poolTargetSize < 1) {
     throw new Error(`supervised pool requires poolTargetSize >= 1 (got ${opts.poolTargetSize})`);
@@ -560,75 +678,15 @@ export async function createSupervisedEnginePlanePool(
         reason: plan.reason,
       };
     },
-    drainIdleSessions: async (count: number): Promise<PoolDrainResult> => {
-      const idleCount = slots.filter((s) => !s.pullWorker.isBusy()).length;
-      const plan = planPoolDrain({
-        poolTargetSize: opts.poolTargetSize,
-        currentCount: slots.length,
-        count,
-        idleCount,
-      });
-
-      let drained = 0;
-      for (let i = 0; i < plan.toDrain; i++) {
-        const index = slots.findIndex((s) => !s.pullWorker.isBusy());
-        if (index < 0) break;
-        await drainSlotAt(index);
-        drained += 1;
-      }
-
-      const remaining = slots.length;
-      return {
-        drained,
-        remaining,
-        targetRemaining: plan.targetRemaining,
-        blocked: plan.blocked || (plan.toDrain > 0 && drained < plan.toDrain),
-        reason: plan.reason,
-      };
-    },
-    scalePool: async (targetSize: number): Promise<PoolScaleResult> => {
-      const plan = planPoolScale({
-        poolTargetSize: opts.poolTargetSize,
-        currentCount: slots.length,
-        targetSize,
-      });
-      if (plan.blocked) {
-        return {
-          added: 0,
-          total: slots.length,
-          targetSize,
-          blocked: true,
-          reason: plan.reason,
-        };
-      }
-
-      const scaleConcurrency = poolConnectConcurrencyFromEnv(process.env, plan.toAdd);
-      const scaleChallenge = connectChallengeForBatch();
-      const scaledSlots = await mapWithConcurrency(plan.toAdd, scaleConcurrency, async () => {
-        const slot = await attachSlotCore(primaryGatewayUrl, scaleChallenge);
-        await registerEpochOnSession(slot.session, slot.sessionId);
-        startPullWorkerOnSlot(slot);
-        return slot;
-      });
-      slots.push(...scaledSlots);
-      const added = scaledSlots.length;
-
-      if (added > 0) {
-        logEnginePoolScale(engineId, added, slots.length);
-      }
-
-      return {
-        added,
-        total: slots.length,
-        targetSize: plan.targetSize,
-        blocked: false,
-      };
-    },
+    drainIdleSessions: (count: number): Promise<PoolDrainResult> => drainIdleSessionsImpl(count),
+    scalePool: (targetSize: number): Promise<PoolScaleResult> => scalePoolImpl(targetSize),
     close: async (reason: AttestedDisconnectRequest["reason"] = "shutdown") => {
       closed = true;
       rotator.stop();
       if (pruneTimer) clearInterval(pruneTimer);
       if (sessionWatchTimer) clearInterval(sessionWatchTimer);
+      if (desiredApplyTimer) clearTimeout(desiredApplyTimer);
+      desiredApplyTimer = null;
       supervisor.markUnhealthy();
       for (const slot of slots) {
         if (slot.reconnectTimer) clearTimeout(slot.reconnectTimer);

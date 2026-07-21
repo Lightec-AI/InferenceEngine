@@ -136,7 +136,11 @@ async function main(): Promise<void> {
       instanceId,
     }),
     poolTargetSize,
-    poolInitialFraction: poolInitialFractionFromEnv(process.env),
+    // Omit poolInitialFraction unless ops set TEECHAT_ENGINE_POOL_INITIAL_FRACTION —
+    // supervised pool then boots at TEECHAT_ENGINE_POOL_BASELINE (default 4).
+    ...(process.env.TEECHAT_ENGINE_POOL_INITIAL_FRACTION?.trim()
+      ? { poolInitialFraction: poolInitialFractionFromEnv(process.env) }
+      : {}),
     gatewayPlatformVerify,
     ed25519PublicB64: material.ed25519Public,
     ed25519PrivateKey: material.ed25519PrivateKey,

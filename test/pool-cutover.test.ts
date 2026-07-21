@@ -10,6 +10,8 @@ import {
   planPoolScale,
   poolConnectConcurrencyFromEnv,
   poolConnectStaggerMsFromEnv,
+  bootPoolSessionCount,
+  poolBaselineFromEnv,
   poolInitialFractionFromEnv,
 } from "../src/engine/pool-cutover.js";
 
@@ -202,6 +204,22 @@ describe("poolInitialFractionFromEnv", () => {
     expect(
       poolInitialFractionFromEnv({ TEECHAT_ENGINE_POOL_INITIAL_FRACTION: "bad" }),
     ).toBe(1);
+  });
+});
+
+describe("bootPoolSessionCount / baseline", () => {
+  it("defaults baseline to 4", () => {
+    expect(poolBaselineFromEnv({})).toBe(4);
+  });
+
+  it("boots at baseline when INITIAL_FRACTION unset", () => {
+    expect(bootPoolSessionCount(32, {})).toBe(4);
+    expect(bootPoolSessionCount(2, {})).toBe(2);
+  });
+
+  it("honors explicit INITIAL_FRACTION including zero-boot", () => {
+    expect(bootPoolSessionCount(32, { TEECHAT_ENGINE_POOL_INITIAL_FRACTION: "0" })).toBe(0);
+    expect(bootPoolSessionCount(32, { TEECHAT_ENGINE_POOL_INITIAL_FRACTION: "0.5" })).toBe(16);
   });
 });
 

@@ -41,6 +41,17 @@ import { isGatewayPlaneTaskEnvelope } from "../server/gateway-plane-task-inferen
 import { runMockInferenceOnEnvelope, type MockInferenceOptions } from "./inference-handler.js";
 import type { OpeNdjsonStreamWriter } from "../server/ope-inference.js";
 
+/** Gateway work-pull hint (see ope-protocol HEADER_OPE_DESIRED_POOL_TARGET). */
+export const HEADER_OPE_DESIRED_POOL_TARGET = "x-ope-desired-pool-target";
+
+export function parseDesiredPoolTargetHeader(raw: unknown): number | undefined {
+  const value = typeof raw === "string" ? raw : Array.isArray(raw) ? raw[0] : undefined;
+  if (typeof value !== "string" || !value.trim()) return undefined;
+  const n = Number(value.trim());
+  if (!Number.isInteger(n) || n < 1) return undefined;
+  return n;
+}
+
 export interface EnginePlanePoolClientOptions {
   gatewayBaseUrl: string;
   tls: GatewayMtlsTlsMaterial;
@@ -253,6 +264,7 @@ export function startPullWorker(
   sessionId: string,
   inference: MockInferenceOptions,
   onError?: (err: Error) => void,
+  onDesiredPoolTarget?: (desired: number) => void,
 ): { stop: () => void; isBusy: () => boolean } {
   let closed = false;
   let busy = false;
@@ -270,10 +282,13 @@ export function startPullWorker(
     let requestId = "";
     let trafficClassHeader = "";
     let gotWork = false;
+    let responseStatus = 0;
 
     pull.on("response", (headers) => {
-      const status = Number(headers[":status"] ?? 0);
-      if (status !== 200) {
+      responseStatus = Number(headers[":status"] ?? 0);
+      const desired = parseDesiredPoolTargetHeader(headers[HEADER_OPE_DESIRED_POOL_TARGET]);
+      if (desired !== undefined) onDesiredPoolTarget?.(desired);
+      if (responseStatus !== 200) {
         pull.resume();
         return;
       }
@@ -290,7 +305,8 @@ export function startPullWorker(
     });
 
     pull.on("end", () => {
-      if (!gotWork || !requestId) {
+      // Idle 204 heartbeat or empty pull — re-poll immediately.
+      if (!gotWork || !requestId || responseStatus === 204) {
         setImmediate(loop);
         return;
       }

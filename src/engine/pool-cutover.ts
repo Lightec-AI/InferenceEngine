@@ -175,6 +175,35 @@ export function poolInitialFractionFromEnv(env: NodeJS.ProcessEnv = process.env)
   return n;
 }
 
+/** Minimum live sessions when applying gateway desired-pool hints (default 4). */
+export const DEFAULT_ENGINE_POOL_BASELINE = 4;
+
+export function poolBaselineFromEnv(env: NodeJS.ProcessEnv = process.env): number {
+  const raw = env.TEECHAT_ENGINE_POOL_BASELINE?.trim();
+  if (!raw) return DEFAULT_ENGINE_POOL_BASELINE;
+  const n = Number(raw);
+  if (!Number.isInteger(n) || n < 1) return DEFAULT_ENGINE_POOL_BASELINE;
+  return n;
+}
+
+/**
+ * Boot session count: explicit INITIAL_FRACTION wins; otherwise min(baseline, poolTargetSize).
+ * Staging cutover sets INITIAL_FRACTION=0 for zero-boot.
+ */
+export function bootPoolSessionCount(
+  poolTargetSize: number,
+  env: NodeJS.ProcessEnv = process.env,
+  poolInitialFraction?: number,
+): number {
+  if (poolTargetSize < 1) return 0;
+  const fractionExplicit = env.TEECHAT_ENGINE_POOL_INITIAL_FRACTION?.trim();
+  if (poolInitialFraction !== undefined || fractionExplicit) {
+    const fraction = poolInitialFraction ?? poolInitialFractionFromEnv(env);
+    return initialPoolSessionCount(poolTargetSize, fraction);
+  }
+  return Math.min(poolBaselineFromEnv(env), poolTargetSize);
+}
+
 /** Default max in-flight attested connects (boot / scale / migrate / reconnect). */
 export const DEFAULT_POOL_CONNECT_CONCURRENCY = 2;
 
